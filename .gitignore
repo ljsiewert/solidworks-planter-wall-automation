@@ -1,0 +1,9 @@
+# Local proprietary reference documents
+/PLANTER_ASSEMBLY.xlsx
+/PNS_COMPONENTS.pdf
+/PNS_MAIN_ASSEMBLY.pdf
+/PNS_SUB_ASSEMBLIES.pdf
+
+# Python validation caches
+__pycache__/
+*.py[cod]
