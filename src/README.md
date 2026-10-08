@@ -60,6 +60,8 @@ After clicking Run, a modeless progress window shows the current stage,
 completed milestone count/bar, elapsed time at the last update, and an
 estimated remaining time when historical timings exist for every remaining
 stage. Model-only runs have nine stages; selected exports add one stage each.
+Preview-only has two stages: table update/rebuild, then model verification
+and releasing temporary reference protection.
 Percent complete counts milestones equally, **not files or time**.
 
 The first run displays an unavailable estimate. Successful workflow runs
@@ -84,6 +86,29 @@ These additions cannot attach a progress window to an already-running macro.
 While a modeless progress window is displayed, do not change the active
 document/configuration or start another macro; repaint/event processing is
 for visibility, not permission to edit the model mid-workflow.
+
+### Preview-only mode
+
+Select **Preview only (no files created)** in `RunWithUI` to update the
+embedded design table and rebuild/verify the template without Pack-and-Go,
+output-folder creation or any exporter. Quote-only and all export checkboxes
+are cleared and disabled. The destination field/browser are disabled and
+no existing output folder is required. Leaving preview mode reenables the
+controls but does not restore previous export selections; select them again.
+
+The model stays open with **unsaved** preview changes and is zoomed to fit.
+Do not save the template: close it without saving and reopen a clean template
+before another preview or full run. Existing clean-template preflight remains
+in force; this version does not permit reuse of a dirty preview. Close any
+other affected template documents without saving as well. Preview restores
+temporary reference read-only states and application preferences on completion
+or failure; no original design-table restoration is attempted.
+
+The preview still writes a local timing log (`RUN_PREVIEW` on completion).
+"No files created" means no model/export deliverables, not absence of logs.
+To install this UI change, replace `userform_automation` and the entire code
+behind the existing `UserForm_AutomationUI`, compile and save. No new class
+or form is required.
 
 ### Runtime logs and performance investigation
 
@@ -237,8 +262,8 @@ reference and is never opened or saved by the macro.
 
 Only N3:N9 are inputs. **N10 and N11 are calculated by Excel**, not written
 by the form; their results drive the center/side planter globals and naming.
-The two corresponding form fields are locked and display "Calculated by
-design table." **N12 is not used for macro naming and is not edited.**
+The calculated center/side length fields are not shown in the input form.
+**N12 is not used for macro naming and is not edited.**
 Existing helper/output formulas and thickness/material rules are preserved.
 
 Enter the three overall dimensions as decimal **inches**, such as `100.25`,
@@ -273,8 +298,20 @@ quote-only, all exports can be off for model-only output.
 - The adapter opens the embedded design table using `EditTable2(True)`,
   validates the headers, input labels, formula cells and configuration, and
   preserves the output formulas while writing N3:N9. Excel recalculates the existing formulas;
-  SolidWorks commits the table and rebuilds **before** packing. Direct writes
+  SolidWorks commits the table and performs **two consecutive full rebuilds**
+  before preview verification or packing, allowing dependent geometry to
+  settle on the second pass. Each pass refreshes reference protection, checks
+  the configuration/API result, and is timed separately. A failure in either
+  pass stops the workflow. Direct writes
   to table-owned equation globals have been removed.
+  In preview and full UI runs, only that workbook's Excel windows are hidden
+  while inputs are edited and calculated; other workbooks and Excel application
+  visibility are left unchanged. Original window visibility is restored and
+  window references released before SolidWorks commits/closes the editor,
+  including failure cleanup. Excel may briefly appear when opening/closing
+  the editor, and later SolidWorks operations may independently show it.
+  This is not a fully silent Excel mode. Install this behavior by replacing
+  the `UIDesignTableSession` class, then compiling and saving the macro.
   Rebuild checks the active configuration first; it requests a configuration
   switch only when necessary and verifies the resulting active name before
   rebuilding. It does not try to reactivate an already-active configuration.

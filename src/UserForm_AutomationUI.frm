@@ -7,6 +7,7 @@ Private WithEvents cancelButton As MSForms.CommandButton
 Private WithEvents browseButton As MSForms.CommandButton
 Private WithEvents wallsBox As MSForms.ComboBox
 Private WithEvents quoteBox As MSForms.CheckBox
+Private WithEvents previewBox As MSForms.CheckBox
 
 Private sideBox As MSForms.ComboBox
 Private returnBox As MSForms.ComboBox
@@ -15,8 +16,6 @@ Private thicknessBox As MSForms.ComboBox
 Private lengthBox As MSForms.TextBox
 Private widthBox As MSForms.TextBox
 Private heightBox As MSForms.TextBox
-Private centerBox As MSForms.TextBox
-Private sideLengthBox As MSForms.TextBox
 Private folderBox As MSForms.TextBox
 Private pdfAssembliesBox As MSForms.CheckBox
 Private pdfComponentsBox As MSForms.CheckBox
@@ -34,7 +33,7 @@ Private Sub UserForm_Initialize()
 
     Me.Caption = "Planter Wall Automation"
     Me.Width = 470
-    Me.Height = 545
+    Me.Height = 515
     acceptedValue = False
 
     Set wallsBox = AddCombo("cboWallCount", "Wall count", 16, Array("1", "2", "3", "4"))
@@ -44,36 +43,31 @@ Private Sub UserForm_Initialize()
     Set lengthBox = AddText("txtOverallLength", "Overall length (in)", 106, "")
     Set widthBox = AddText("txtOverallWidth", "Overall width (in)", 136, "")
     Set heightBox = AddText("txtOverallHeight", "Overall height (in)", 166, "")
-    Set centerBox = AddText("txtCenterLength", "Center planter length (in)", 196, "Calculated by design table")
-    centerBox.Locked = True
-    centerBox.TabStop = False
-    Set sideLengthBox = AddText("txtSideLength", "Side planter length (in)", 226, "Calculated by design table")
-    sideLengthBox.Locked = True
-    sideLengthBox.TabStop = False
-    Set materialBox = AddCombo("cboMaterial", "Material", 256, Array("Mild Steel", "Borcon Weathering Steel"))
-    Set thicknessBox = AddCombo("cboThickness", "Material thickness", 286, Array("3/16 inch", "1/4 inch"))
-    Set folderBox = AddText("txtOutputFolder", "Output parent folder", 316, packngo1.packTestFolder)
+    Set materialBox = AddCombo("cboMaterial", "Material", 196, Array("Mild Steel", "Borcon Weathering Steel"))
+    Set thicknessBox = AddCombo("cboThickness", "Material thickness", 226, Array("3/16 inch", "1/4 inch"))
+    Set folderBox = AddText("txtOutputFolder", "Output parent folder", 256, packngo1.packTestFolder)
     folderBox.Width = 220
-    Set browseButton = AddButton("cmdBrowse", "...", 403, 316, 35)
+    Set browseButton = AddButton("cmdBrowse", "...", 403, 256, 35)
 
-    Set quoteBox = AddCheck("chkQuoteOnly", "Quote only (assembly PDFs only)", 16, 348)
-    Set pdfAssembliesBox = AddCheck("chkPDFAssemblies", "PDF assemblies", 16, 380)
-    Set pdfComponentsBox = AddCheck("chkPDFComponents", "PDF components", 235, 380)
-    Set dxfBox = AddCheck("chkDXF", "DXF files", 16, 406)
-    Set stepBox = AddCheck("chkSTEP", "STEP files", 235, 406)
+    Set previewBox = AddCheck("chkPreviewOnly", "Preview only (no files created)", 16, 288)
+    Set quoteBox = AddCheck("chkQuoteOnly", "Quote only (assembly PDFs only)", 16, 318)
+    Set pdfAssembliesBox = AddCheck("chkPDFAssemblies", "PDF assemblies", 16, 350)
+    Set pdfComponentsBox = AddCheck("chkPDFComponents", "PDF components", 235, 350)
+    Set dxfBox = AddCheck("chkDXF", "DXF files", 16, 376)
+    Set stepBox = AddCheck("chkSTEP", "STEP files", 235, 376)
     pdfAssembliesBox.Value = True
 
     Set note = Me.Controls.Add("Forms.Label.1", "lblNotes", True)
     note.Caption = "New output only; no overwrite. A PACK_TEST subfolder is added if needed." & vbCrLf & _
                    "Selected export macros may still show status/error dialogs."
     note.Left = 16
-    note.Top = 438
+    note.Top = 408
     note.Width = 425
     note.Height = 32
 
-    Set runButton = AddButton("cmdRun", "Run", 250, 478, 90)
+    Set runButton = AddButton("cmdRun", "Run", 250, 448, 90)
     runButton.Default = True
-    Set cancelButton = AddButton("cmdCancel", "Cancel", 348, 478, 90)
+    Set cancelButton = AddButton("cmdCancel", "Cancel", 348, 448, 90)
     cancelButton.Cancel = True
 
     wallsBox.ListIndex = -1
@@ -187,10 +181,25 @@ Private Sub quoteBox_Click()
         dxfBox.Value = False
         stepBox.Value = False
     End If
-    pdfAssembliesBox.Enabled = Not quoteBox.Value
-    pdfComponentsBox.Enabled = Not quoteBox.Value
-    dxfBox.Enabled = Not quoteBox.Value
-    stepBox.Enabled = Not quoteBox.Value
+    pdfAssembliesBox.Enabled = Not quoteBox.Value And Not previewBox.Value
+    pdfComponentsBox.Enabled = Not quoteBox.Value And Not previewBox.Value
+    dxfBox.Enabled = Not quoteBox.Value And Not previewBox.Value
+    stepBox.Enabled = Not quoteBox.Value And Not previewBox.Value
+End Sub
+
+Private Sub previewBox_Click()
+    If quoteBox Is Nothing Then Exit Sub
+    If previewBox.Value Then
+        quoteBox.Value = False
+        pdfAssembliesBox.Value = False
+        pdfComponentsBox.Value = False
+        dxfBox.Value = False
+        stepBox.Value = False
+    End If
+    quoteBox.Enabled = Not previewBox.Value
+    folderBox.Enabled = Not previewBox.Value
+    browseButton.Enabled = Not previewBox.Value
+    quoteBox_Click
 End Sub
 
 Private Sub browseButton_Click()
@@ -225,7 +234,7 @@ Private Sub runButton_Click()
     height = ReadDimension(heightBox, "Overall height")
     UIValidateDimensions length, width, height
     selectedFolder = Trim$(folderBox.Text)
-    Call UIOutputRoot(selectedFolder)
+    If Not previewBox.Value Then Call UIOutputRoot(selectedFolder)
 
     UIMapSelections CLng(wallsBox.Value), CStr(sideBox.Value), _
                     CStr(returnBox.Value), CStr(materialBox.Value), CStr(thicknessBox.Value)
@@ -242,7 +251,12 @@ Private Sub runButton_Click()
     exportPDFComponents = Not quoteOnly And CBool(pdfComponentsBox.Value)
     exportDXF = Not quoteOnly And CBool(dxfBox.Value)
     exportSTEP = Not quoteOnly And CBool(stepBox.Value)
-    UICheckExportFiles
+    previewOnly = CBool(previewBox.Value)
+    If previewOnly Then
+        outputFolder = ""
+        UIDisableExports
+    End If
+    If Not previewOnly Then UICheckExportFiles
     acceptedValue = True
     Me.Hide
     Exit Sub

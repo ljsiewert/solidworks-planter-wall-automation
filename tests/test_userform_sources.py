@@ -135,13 +135,13 @@ class SourceContracts(unittest.TestCase):
 
     def test_form_controls_and_events(self):
         for name in ("cboWallCount", "cboSide", "cboReturnType", "txtOverallLength",
-                     "txtOverallWidth", "txtOverallHeight", "txtCenterLength",
-                     "txtSideLength", "cboMaterial", "cboThickness", "txtOutputFolder",
-                     "chkQuoteOnly", "chkPDFAssemblies", "chkPDFComponents", "chkDXF",
+                     "txtOverallWidth", "txtOverallHeight",
+                     "cboMaterial", "cboThickness", "txtOutputFolder",
+                     "chkPreviewOnly", "chkQuoteOnly", "chkPDFAssemblies", "chkPDFComponents", "chkDXF",
                      "chkSTEP", "cmdRun", "cmdCancel", "cmdBrowse"):
             self.assertIn(f'"{name}"', FORM)
         for event in ("runButton_Click", "cancelButton_Click", "browseButton_Click",
-                      "wallsBox_Change", "quoteBox_Click"):
+                      "wallsBox_Change", "quoteBox_Click", "previewBox_Click"):
             self.assertIn(f"Private Sub {event}()", FORM)
             member = event.split("_")[0]
             self.assertIn(f"Private WithEvents {member} As MSForms.", FORM)
@@ -154,8 +154,8 @@ class SourceContracts(unittest.TestCase):
         self.assertIn("UIInchesText = Trim$(Str$(value))", MODULE)
         self.assertIn("CStr(length)", FORM)
         self.assertIn("UIValidateDimensions length, width, height", FORM)
-        self.assertIn("centerBox.Locked = True", FORM)
-        self.assertIn("sideLengthBox.Locked = True", FORM)
+        self.assertNotIn("centerBox", FORM)
+        self.assertNotIn("sideLengthBox", FORM)
         self.assertNotIn("ReadDimension(centerBox", FORM)
         self.assertNotIn("ReadDimension(sideLengthBox", FORM)
         self.assertIn("designTableInputs = Array(", FORM)
@@ -170,6 +170,14 @@ class PortableHelperTests(unittest.TestCase):
         ).group(0)
         body = body.replace("Private Sub", "Sub", 1)
         body = re.sub(r" As String\b", "", body)
+        apply_body = TABLE.split("Public Sub Apply(", 1)[1].split("End Sub", 1)[0]
+        after_commit = apply_body.split(
+            "CloseSheet swDesignTableUpdateOptions_e.swUpdateDesignTableAll", 1
+        )[1]
+        self.assertEqual(after_commit.count('Rebuild "'), 2)
+        self.assertIn("pass 1 of 2", after_commit)
+        self.assertIn("pass 2 of 2", after_commit)
+        body += "\nSub PostTableRebuilds()\n" + after_commit + "\nEnd Sub\n"
         script = r'''
 Option Explicit
 Const TABLE_ERROR = -2147219304
@@ -187,7 +195,7 @@ Class FakeManager
 End Class
 Class FakeModel
     Public ConfigurationManager, activateCalls, rebuildCalls
-    Public activationResult, changeName, rebuildResult
+    Public activationResult, changeName, rebuildResult, failAt
     Private Sub Class_Initialize()
         Set ConfigurationManager = New FakeManager
         activateCalls = 0
@@ -204,6 +212,7 @@ Class FakeModel
     Public Function ForceRebuild3(topOnly)
         rebuildCalls = rebuildCalls + 1
         ForceRebuild3 = rebuildResult
+        If rebuildCalls = failAt Then ForceRebuild3 = False
     End Function
 End Class
 Sub Assert(condition, message)
@@ -269,6 +278,26 @@ For Each representation In Array(1, -1)
     model.rebuildResult = representation
     Rebuild "test"
     Assert model.activateCalls = 1 And model.rebuildCalls = 1, "Accept True=1 for configuration switch"
+Next
+For Each representation In Array(1, -1)
+    Set model = New FakeModel
+    model.ConfigurationManager.ActiveConfiguration.Name = configurationName
+    model.rebuildResult = representation
+    PostTableRebuilds
+    Assert model.rebuildCalls = 2, "Exactly two full rebuilds after table commit"
+    Assert model.activateCalls = 0, "Double rebuild preserves active configuration"
+Next
+For Each representation In Array(1, 2)
+    Set model = New FakeModel
+    model.ConfigurationManager.ActiveConfiguration.Name = configurationName
+    model.failAt = representation
+    On Error Resume Next
+    PostTableRebuilds
+    number = Err.Number
+    Err.Clear
+    On Error GoTo 0
+    Assert number <> 0, "Failure in either post-table pass propagates"
+    Assert model.rebuildCalls = representation, "Stop immediately on failed pass"
 Next
 WScript.Echo "PASS: already-active, switched, failed-switch and failed-rebuild paths"
 '''

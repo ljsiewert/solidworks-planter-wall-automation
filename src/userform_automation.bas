@@ -3,6 +3,7 @@ Option Explicit
 
 ' Import into the SAME VBA project as packngo1, not the exporter projects.
 Public quoteOnly As Boolean
+Public previewOnly As Boolean
 Public exportPDFAssemblies As Boolean
 Public exportPDFComponents As Boolean
 Public exportDXF As Boolean
@@ -68,7 +69,11 @@ Public Sub RunWithUI()
     If form.Accepted Then
         Unload form
         Set form = Nothing
-        UIRunAutomation
+        If previewOnly Then
+            UIRunPreview
+        Else
+            UIRunAutomation
+        End If
     End If
 
 Finished:
@@ -79,6 +84,77 @@ Finished:
 Failed:
     MsgBox Err.Description, vbCritical, "Planter Automation"
     Resume Finished
+End Sub
+
+Public Sub UIDisableExports()
+    quoteOnly = False
+    exportPDFAssemblies = False
+    exportPDFComponents = False
+    exportDXF = False
+    exportSTEP = False
+End Sub
+
+Private Sub UIRunPreview()
+    Dim template As SldWorks.ModelDoc2
+    Dim tableSession As UIDesignTableSession
+    Dim saveGuard As UIReferenceSaveGuard
+    Dim progress As UIProgressSession
+    Dim plan As New Collection
+    Dim expected As Variant
+    Dim failure As String
+    Dim logPath As String
+    Dim i As Long
+    On Error GoTo Failed
+    UIDisableExports
+    outputFolder = ""
+    packngo1.destFolder = ""
+    Set template = packngo1.swModel
+    UIRequireCleanTemplate template
+    Set runLogger = New UIRunLogger
+    runLogger.BeginRun UI_LOG_FOLDER
+    logPath = runLogger.Path
+    UITraceDetail "Preview template", template.GetPathName
+    UITraceDetail "Preview configuration", template.ConfigurationManager.ActiveConfiguration.Name
+    For i = 0 To 6
+        UITraceDetail "Input N" & CStr(i + 3), CStr(designTableInputs(i))
+    Next i
+    plan.Add "Updating preview design table and rebuilding template"
+    plan.Add "Verifying preview model and releasing protection"
+    Set progress = New UIProgressSession
+    progress.BeginRun plan
+    progress.NextStage
+    Set saveGuard = New UIReferenceSaveGuard
+    saveGuard.BeginGuard packngo1.swApp, template
+    Set tableSession = New UIDesignTableSession
+    tableSession.SetSaveGuard saveGuard
+    tableSession.Apply template, designTableInputs, expected
+    progress.NextStage
+    UIReadCalculatedGlobals template, expected
+    UITraceDetail "Calculated planter lengths", "Center=" & packngo1.centerPlanterLength & _
+        "; side=" & packngo1.sidePlanterLength
+    saveGuard.Restore
+    template.ViewZoomtofit2
+    progress.Complete
+    runLogger.Finish "PREVIEW", "Template left open and unsaved. No Pack-and-Go or exports."
+    Set runLogger = Nothing
+    MsgBox "Preview ready. The template is open with unsaved design changes." & vbCrLf & _
+        "No model copies or exports were created." & vbCrLf & _
+        "Do not save the template. Close it without saving and reopen before another preview or full run." & _
+        vbCrLf & "Run log: " & logPath, vbInformation, "Model Preview"
+    Exit Sub
+Failed:
+    failure = Err.Description
+    If Not tableSession Is Nothing Then
+        If UICloseTableEditor(tableSession) = False Then failure = failure & vbCrLf & "Table editor cleanup failed."
+    End If
+    If Not saveGuard Is Nothing Then
+        If UIRestoreSaveGuard(saveGuard) = False Then failure = failure & vbCrLf & "Reference protection cleanup failed."
+    End If
+    If Not progress Is Nothing Then progress.CloseWindow
+    If Not runLogger Is Nothing Then runLogger.Finish "FAILED", failure
+    Set runLogger = Nothing
+    MsgBox failure & vbCrLf & "Close the preview template without saving." & _
+        vbCrLf & "Run log: " & logPath, vbCritical, "Preview Stopped"
 End Sub
 
 Public Function UIParseInches(ByVal text As String) As Double

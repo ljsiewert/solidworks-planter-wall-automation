@@ -16,6 +16,8 @@ Private sheet As Object
 Private protectedFormulas As Variant
 Private configurationName As String
 Private saveGuard As UIReferenceSaveGuard
+Private workbookWindows As Collection
+Private windowVisibility As Collection
 
 Public Sub SetSaveGuard(ByVal guard As UIReferenceSaveGuard)
     Set saveGuard = guard
@@ -61,10 +63,12 @@ Public Sub Apply(ByVal document As SldWorks.ModelDoc2, ByVal inputs As Variant, 
     VerifyInputs inputs
     outputs = ReadOutputs()
     CloseSheet swDesignTableUpdateOptions_e.swUpdateDesignTableAll
-    Rebuild "applying the design table inputs"
+    Rebuild "applying the design table inputs (pass 1 of 2)"
+    Rebuild "applying the design table inputs (pass 2 of 2)"
 End Sub
 
 Public Sub CloseEditor()
+    RestoreWorkbookWindows
     If table Is Nothing Then Exit Sub
     If table.IsActive Then CloseSheet swDesignTableUpdateOptions_e.swUpdateDesignTableNone
 End Sub
@@ -79,10 +83,39 @@ Private Sub OpenSheet()
     If sheet Is Nothing Then
         Err.Raise TABLE_ERROR, "UIDesignTableSession", "SolidWorks could not open the embedded Excel design table."
     End If
+    HideWorkbookWindows
     UITraceEnd "Open embedded design table"
 End Sub
 
+Private Sub HideWorkbookWindows()
+    Dim window As Object
+    Set workbookWindows = New Collection
+    Set windowVisibility = New Collection
+    For Each window In sheet.Parent.Windows
+        workbookWindows.Add window
+        windowVisibility.Add CBool(window.Visible)
+        window.Visible = False
+    Next window
+End Sub
+
+Private Sub RestoreWorkbookWindows()
+    Dim window As Object
+    Dim index As Long
+    If workbookWindows Is Nothing Then Exit Sub
+    Do While workbookWindows.Count > 0
+        index = workbookWindows.Count
+        Set window = workbookWindows(index)
+        window.Visible = CBool(windowVisibility(index))
+        workbookWindows.Remove index
+        windowVisibility.Remove index
+    Loop
+    Set workbookWindows = Nothing
+    Set windowVisibility = Nothing
+End Sub
+
 Private Sub CloseSheet(ByVal updateOption As Long)
+    ' Restore and release workbook windows before SolidWorks closes its Excel editor.
+    RestoreWorkbookWindows
     If Not saveGuard Is Nothing Then saveGuard.ProtectLoadedReferences
     ' Release the Excel worksheet before SolidWorks closes the table's Excel window.
     Set sheet = Nothing

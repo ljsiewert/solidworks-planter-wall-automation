@@ -22,6 +22,10 @@ The five original macro sources remain unchanged by the UI integration.
 - Mild Steel or Borcon Weathering Steel, in 3/16-inch or 1/4-inch thickness.
 - Output folder selection, quote-only mode, and independent assembly PDF,
   component PDF, DXF and STEP selections.
+- Preview-only selection updates/rebuilds the unsaved template without
+  Pack-and-Go or exports; export choices are cleared and disabled. Close
+  without saving and reopen before the next run. Calculated center/side
+  lengths are no longer displayed as input fields.
 - A progress window with current stage, completed milestones, elapsed time
   and rough remaining-time estimates from previous successful runs.
 - Local per-run timing logs for investigating Excel, rebuild, Pack-and-Go
