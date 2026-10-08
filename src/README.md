@@ -18,9 +18,10 @@ button/shortcut pointing at that procedure.
 3. Also use **File > Import File** to import
    [UIDesignTableSession.cls](UIDesignTableSession.cls). This is a class
    module, not a standard module. It updates the embedded design table and
-   restores the original inputs; no Excel VBA-project access is needed.
+   leaves the original unsaved for discard; no Excel VBA-project access is needed.
    Also import [UIReferenceSaveGuard.cls](UIReferenceSaveGuard.cls), which
    protects loaded template references against suppression-time save prompts.
+   Import [UIRunLogger.cls](UIRunLogger.cls) for local timing diagnostics.
 4. Use **Insert > UserForm** and set its **(Name)** to
    `UserForm_AutomationUI`. Open its code window and paste the **entire**
    [UserForm_AutomationUI.frm](UserForm_AutomationUI.frm) source.
@@ -74,8 +75,8 @@ SolidWorks/Excel/export macro call can block VBA for minutes; the stage label
 remains the last reported activity and the timer/bar may not refresh until
 that call returns. There is no background countdown, per-file export progress
 or cancellation button. The unchanged exporters do not expose that progress.
-The window closes on completion or failure; failures still restore the
-template and show the existing error dialogs. Timing-storage errors are
+The window closes on completion or failure; failures release temporary
+settings and show the existing error dialogs. Timing-storage errors are
 reported separately without claiming the model workflow failed.
 
 **Wait for the current run to finish before updating/recompiling the macro.**
@@ -83,6 +84,86 @@ These additions cannot attach a progress window to an already-running macro.
 While a modeless progress window is displayed, do not change the active
 document/configuration or start another macro; repaint/event processing is
 for visibility, not permission to edit the model mid-workflow.
+
+### Runtime logs and performance investigation
+
+Every submitted UI run writes a timestamped UTF-16 tab-separated `.log` in:
+
+```text
+C:\Users\lsiewert\StudioProjects\solidworks-planter-wall-automation\run-logs
+```
+
+The macro creates this directory automatically. `UI_LOG_FOLDER` in
+`userform_automation` is the configurable location: update it for other
+machines. The parent repository directory must exist and be writable.
+If log creation fails, the run stops before any model changes. If a later
+append fails, logging is disabled with an explicit warning while automation
+and cleanup continue. Logging has no background process or external service.
+
+Logs include:
+
+- Template path, SolidWorks revision, N3:N9 input values, export selections
+  and output location.
+- BEGIN/END timing for each progress stage and more detailed Excel open,
+  calculation, table commit, reference preflight, template/packed rebuild
+  and packed save operations.
+- Calculated planter lengths and Pack-and-Go document count.
+- SUMMARY duration rows and total runtime.
+- Failure details, cleanup duration and INCOMPLETE operations on failed runs.
+  Each record is written and closed immediately, so an interrupted run
+  retains the events already written even without a final summary.
+
+The final completion/error dialog gives the log path. After a run, leave
+the file in `run-logs` and point the assistant at its filename for analysis.
+Logs remain **local and Git-ignored**, since they contain engineering inputs
+and local/network paths. No log is uploaded or committed automatically.
+
+Timings are wall-clock seconds with subsecond timer resolution, including
+time waiting in dialogs. Nested operations overlap: compare stage totals
+separately from their child-operation durations rather than summing all rows.
+Clock adjustments can affect measurements. Export logs measure the whole
+standalone macro invocation; exporter internals are not instrumented here.
+
+Performance candidates to evaluate after collecting a baseline:
+
+1. Duplicate rebuild work: initial template rebuild, post-table rebuild,
+   collection rebuild, and packed-copy rebuild. Do not remove them
+   merely because there are several; prove geometry/references remain correct.
+2. Excel table-open/commit costs versus actual formula calculation time.
+3. Pack-and-Go network I/O, drawing inclusion and document count. Compare
+   equivalent runs to local and network output folders if stage 6 dominates.
+4. Export invocation costs; use the exporters' own logs for individual
+   drawing/part detail where available.
+
+Original-table restoration has already been removed on the experimental
+branch; stage 7 closes the original without saving. No additional rebuild,
+reference inclusion, geometry or exporter behavior is skipped by logging.
+Start with a model-only run, then the same inputs with selected exports.
+Use another empty output parent for each equivalent run to avoid overwrite
+rejection, and note any manual dialog delays when comparing logs.
+
+UI mode now uses a separately instrumented equivalent of manual Step4:
+collection rebuild, `GetPackAndGo`, enabling drawing inclusion, and
+`GetDocumentNames` each have their own timings. The original manual module
+is unchanged. UI mode still rejects failed native collection rather than
+using the manual fallback, and it now checks the collection rebuild result.
+Discovery prepares one Pack-and-Go object; `SavePackAndGo` is called once
+to write the renamed copies. SUMMARY rows repeat measurements, not work.
+
+Before names are replaced, diagnostics record each selected source path,
+on-disk file size and metadata lookup duration. Failures are recorded and
+warned about without substituting for SolidWorks save-status validation.
+This is metadata access, not a full content-read/throughput test, and adds
+a separately timed inventory pass. No source file is saved, copied or
+changed by that pass. The blocking `SavePackAndGo` call also has its own
+timing; the API does not expose internal per-file progress here.
+
+The original closes without saving, so reopening it shows its old saved
+inputs by design; the macro does not rewrite those values. The packed model's
+equation values are checked against the new table outputs before saving.
+That is not a direct reread of the packed table's N3:N9 cells. If those cells
+appear old in the packed copy, identify that document's path and report it
+so table persistence can be investigated separately.
 
 ### Suppression-time "Save Modified Documents" dialogs
 
@@ -99,16 +180,20 @@ reference already has unsaved changes, the workflow stops **before changing
 any reference state**: resolve those changes manually and rerun. This also
 protects shared references with existing unsaved work in another assembly.
 
-The guard remains active through template updates, Pack-and-Go and template
-restoration. Before opening the packed assembly/exporting, it restores the
+The guard remains active through template updates, Pack-and-Go and closing
+the original without saving. Before opening the packed assembly/exporting, it restores the
 original discard setting and each still-loaded reference's original
 read-only state. Error cleanup attempts every restoration even if one fails,
 and reports failures explicitly. The guard does not change filesystem
 permissions or file contents and never saves template references.
 
-References loaded for the first time during the run are not pre-protected;
-dialogs for those documents, virtual components or other save operations may
-still appear. This is not a universal "Don't Save" handler. Automatic discard
+The design-table adapter refreshes protection before each table commit and
+rebuild. It also refreshes protection before closing the original. Previously checked paths that have been
+unloaded/reloaded are made read-only again without replacing their original
+state snapshot. Newly loaded references are added only if clean; untracked
+dirty references stop the workflow rather than being silently discarded.
+Virtual components or references loaded within a blocking API call may
+still prompt. This is not a universal "Don't Save" handler. Automatic discard
 can unload modified suppressed references, so verify the packed model's
 geometry as well as its global values. Test this mode on a disposable
 template copy before production use.
@@ -187,7 +272,7 @@ quote-only, all exports can be off for model-only output.
   overwritten; select another parent for another run of the same part.
 - The adapter opens the embedded design table using `EditTable2(True)`,
   validates the headers, input labels, formula cells and configuration, and
-  snapshots N3:N9 before writing. Excel recalculates the existing formulas;
+  preserves the output formulas while writing N3:N9. Excel recalculates the existing formulas;
   SolidWorks commits the table and rebuilds **before** packing. Direct writes
   to table-owned equation globals have been removed.
   Rebuild checks the active configuration first; it requests a configuration
@@ -207,13 +292,22 @@ quote-only, all exports can be off for model-only output.
   matching the table gauge, not a stale `THICKNESS_LABEL` model value.
   Material assignment and component suppression still depend on the
   template's existing rules; no new material database assignment is invented.
-- The original N3:N9 contents and N8 formatting are restored after
-  Pack-and-Go, including on failure. The restored table calculations and
-  rebuilt model globals are verified. The original document stays open
-  and is **not saved or closed**, preserving pre-existing unsaved work.
-  Table changes/restoration
-  can leave it marked dirty; inspect it before choosing to save. Failed
-  restoration is reported explicitly.
+- After every Pack-and-Go save status succeeds and the packed main file is
+  confirmed, the original template is **closed without saving** with
+  `ISldWorks.CloseDoc`. There is no original-table restoration or second
+  template rebuild. The original disk files are not saved by this workflow.
+  Stage 7 now closes the original and releases temporary reference protection.
+- Pre-existing unsaved main-template changes block the run, as do unsaved
+  affected references. Reopen a clean template before starting. On failure,
+  the table editor is closed if possible, temporary protection/settings are
+  restored, and any still-open original is left unsaved for inspection:
+  **close it without saving** to discard changes. Do not save its run-time
+  table edits back into the template.
+- `CloseDoc` can also unload hidden documents; do not keep unrelated unsaved
+  work open during automation. References held by other open documents may
+  remain loaded; the workflow reports if the original itself stays loaded.
+  Separately opened template references can remain dirty and unsaved; review
+  or close them without saving before the next run.
 - Native document collection/renaming and every Pack-and-Go save status
   must succeed. The manual fallback is rejected in UI mode because it
   does not implement the requested naming. The packed assembly is opened
@@ -263,7 +357,8 @@ for these acceptance checks:
    against the inputs, not merely filenames. For four walls, no returns,
    100-inch length/width, 10-inch height, 3/16-inch Mild Steel, the main name
    must be `40-0-C10000-S10000-1000-11.SLDASM`.
-4. Verify original table inputs are restored and no template file is saved;
+4. Verify the original closes without saving, reopen it and confirm its
+   disk-backed table inputs are unchanged;
    confirm packed table inputs and calculated globals retain the submitted
    values after reopen. Verify N10:N11 formulas are unchanged. For the
    workbook's original 500 x 500 x 48-inch, four-wall, 1/4-inch setup,

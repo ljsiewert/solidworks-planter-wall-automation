@@ -24,6 +24,8 @@ The five original macro sources remain unchanged by the UI integration.
   component PDF, DXF and STEP selections.
 - A progress window with current stage, completed milestones, elapsed time
   and rough remaining-time estimates from previous successful runs.
+- Local per-run timing logs for investigating Excel, rebuild, Pack-and-Go
+  and exporter bottlenecks; logs are kept out of Git.
 - A scoped read-only reference guard intended to discard suppression-time
   template changes without saving the originals.
 
@@ -38,6 +40,7 @@ embedded design table.
    [design-table](src/UIDesignTableSession.cls),
    [progress](src/UIProgressSession.cls), and
    [reference-save guard](src/UIReferenceSaveGuard.cls) class modules.
+   Also import the [runtime logger](src/UIRunLogger.cls).
 4. Create UserForms named `UserForm_AutomationUI` and
    `UserForm_AutomationProgress`. Paste their respective
    [input-form](src/UserForm_AutomationUI.frm) and
@@ -74,8 +77,12 @@ the documented table layout to run the automation.
 
 - Existing part-number output folders are rejected, not overwritten.
 - Output uses a `PACK_TEST` path segment required by the unchanged exporters.
-- Original table inputs and temporary read-only/settings changes are
-  restored; the original template is not automatically saved.
+- The original template is closed without saving after Pack-and-Go succeeds;
+  its design table is not restored or rebuilt back to the original design.
+  Temporary read-only/settings changes are restored before opening the copy.
+- Pre-existing unsaved main-template changes block the run. On failure,
+  any still-open template is left unsaved for inspection; close it without
+  saving to discard the run's changes.
 - Pre-existing unsaved changes in affected references block automatic
   discard. Newly loaded references may still show save prompts.
 - Do not edit other documents or run another macro during automation.
@@ -88,6 +95,9 @@ the documented table layout to run the automation.
   Always inspect export results and verify geometry, suppression and material.
 
 ## Tests and validation status
+
+See the deployment guide's [runtime logging section](src/README.md#runtime-logs-and-performance-investigation)
+for the log folder, configuration and baseline profiling steps.
 
 From the repository root:
 

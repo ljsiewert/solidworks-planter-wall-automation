@@ -7,3 +7,6 @@
 # Python validation caches
 __pycache__/
 *.py[cod]
+
+# Runtime logs contain local paths and design inputs
+/run-logs/

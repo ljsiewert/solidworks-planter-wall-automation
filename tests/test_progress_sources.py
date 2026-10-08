@@ -33,7 +33,7 @@ class ProgressSourceTests(unittest.TestCase):
                 stage_count += int(selected)
                 advances -= int(not selected)
             self.assertEqual(stage_count, advances)
-        for operation in ("tableSession.Apply", "SavePackAndGo", "tableSession.Restore",
+        for operation in ("tableSession.Apply", "SavePackAndGo", "CloseDoc templatePath",
                           "OpenDoc6", "packed.ForceRebuild3"):
             self.assertIn(operation, workflow)
         self.assertLess(workflow.index("progress.Complete"), workflow.index('MsgBox "Pack-and-Go'))
@@ -108,6 +108,10 @@ Sub SaveTimings()
     saveCalls = saveCalls + 1
 End Sub
 Sub DoEvents()
+End Sub
+Sub UITraceBegin(name)
+End Sub
+Sub UITraceEnd(name)
 End Sub
 Sub Assert(condition, message)
     If Not condition Then

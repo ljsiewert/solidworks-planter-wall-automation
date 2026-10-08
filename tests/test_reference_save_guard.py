@@ -10,6 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 GUARD = (ROOT / "src" / "UIReferenceSaveGuard.cls").read_text(encoding="ascii")
 MODULE = (ROOT / "src" / "userform_automation.bas").read_text(encoding="ascii")
+TABLE = (ROOT / "src" / "UIDesignTableSession.cls").read_text(encoding="ascii")
 
 
 class ReferenceGuardContracts(unittest.TestCase):
@@ -26,9 +27,11 @@ class ReferenceGuardContracts(unittest.TestCase):
         self.assertIn("issues = issues & RestorePreference()", GUARD)
         workflow = MODULE.split("Private Sub UIRunAutomation()", 1)[1]
         self.assertLess(workflow.index("saveGuard.BeginGuard"), workflow.index("tableSession.Apply"))
-        self.assertLess(workflow.index("tableSession.Restore"), workflow.index("saveGuard.Restore"))
+        self.assertLess(workflow.index("CloseDoc templatePath"), workflow.index("saveGuard.Restore"))
         self.assertLess(workflow.index("saveGuard.Restore"), workflow.index("swApp.OpenDoc6"))
         self.assertIn("UIRestoreSaveGuard(saveGuard)", workflow.split("Failed:", 1)[1])
+        self.assertIn("tableSession.SetSaveGuard saveGuard", workflow)
+        self.assertEqual(TABLE.count("saveGuard.ProtectLoadedReferences"), 2)
 
 
 @unittest.skipUnless(shutil.which("cscript"), "Windows Script Host required")
@@ -99,13 +102,18 @@ Class FakeDocument
     End Function
 End Class
 Class FakeApp
-    Public preference, prefCalls
+    Public preference, prefCalls, includeReference
     Private Sub Class_Initialize()
         preference = False
         prefCalls = 0
+        includeReference = True
     End Sub
     Public Function GetDocuments()
-        GetDocuments = Array(template, reference, unrelated)
+        If includeReference Then
+            GetDocuments = Array(template, reference, unrelated)
+        Else
+            GetDocuments = Array(template, unrelated)
+        End If
     End Function
     Public Function GetOpenDocumentByName(path)
         If path = reference.path Then
@@ -151,6 +159,36 @@ guard.Restore
 Assert reference.readOnly = False And app.preference = False, "Original states restored"
 guard.Restore
 Assert reference.setCalls = 2, "Repeated cleanup does not toggle again"
+Setup
+guard.BeginGuard app, template
+reference.readOnly = False
+reference.dirty = True
+guard.ProtectLoadedReferences
+Assert reference.readOnly, "Re-protect a reloaded originally checked reference"
+Assert unrelated.setCalls = 0, "Refresh never touches unrelated documents"
+guard.Restore
+Assert reference.readOnly = False, "Reload must not replace original writable-state snapshot"
+Setup
+app.includeReference = False
+guard.BeginGuard app, template
+app.includeReference = True
+guard.ProtectLoadedReferences
+Assert reference.readOnly, "Protect a newly loaded clean reference"
+guard.Restore
+Assert reference.readOnly = False, "Restore newly loaded reference state"
+Setup
+app.includeReference = False
+guard.BeginGuard app, template
+app.includeReference = True
+reference.dirty = True
+On Error Resume Next
+guard.ProtectLoadedReferences
+number = Err.Number
+Err.Clear
+On Error GoTo 0
+Assert number <> 0 And reference.setCalls = 0, "Never discard untracked unsaved work"
+guard.Restore
+Assert app.preference = False, "Restore settings after unsafe newly loaded reference"
 Setup
 reference.readOnly = True
 app.preference = True

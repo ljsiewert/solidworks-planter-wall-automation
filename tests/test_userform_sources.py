@@ -50,9 +50,11 @@ class SourceContracts(unittest.TestCase):
             "DeleteFile",
         ):
             self.assertNotIn(forbidden, MODULE)
-        for helper in ("Step3_BuildNames", "Step4_GetDocumentNames",
+        for helper in ("Step3_BuildNames",
                        "Step6_BuildRenamedList", "Step7_ApplyRenamedList"):
             self.assertIn("packngo1." + helper, MODULE)
+        self.assertIn("    UICollectPackAndGoDocuments", MODULE)
+        self.assertNotIn("packngo1.Step4_GetDocumentNames()", MODULE)
 
     def test_design_table_and_template_safety(self):
         for equation in ("WALL_COUNT", "SIDE", "RETURN_TYPE", "OVERALL_LENGTH",
@@ -63,13 +65,16 @@ class SourceContracts(unittest.TestCase):
         self.assertNotRegex(MODULE, r"\.Equation\([^)]*\)\s*=")
         self.assertIn("tableSession.Apply template, designTableInputs, expected", MODULE)
         self.assertIn("UIReadCalculatedGlobals template, expected", MODULE)
-        self.assertIn("tableSession.Restore", MODULE)
+        self.assertNotIn("tableSession.Restore", MODULE)
         self.assertIn("UIVerifyDesignTableModel packed, expected", MODULE)
         self.assertIn("configurationName, errors, warnings", MODULE)
         self.assertNotIn("template.Save", MODULE)
-        self.assertNotIn("CloseDoc", MODULE)
-        self.assertIn('originals = sheet.Range("N3:N9").Formula', TABLE)
-        self.assertIn('sheet.Range("N3:N9").Formula = originals', TABLE)
+        self.assertIn("packngo1.swApp.CloseDoc templatePath", MODULE)
+        self.assertIn("UIRequireCleanTemplate packngo1.swModel", MODULE)
+        self.assertIn("UIRequireCleanTemplate template", MODULE)
+        self.assertIn("Public Sub CloseEditor()", TABLE)
+        self.assertNotIn("Public Sub Restore()", TABLE)
+        self.assertNotIn("originals", TABLE)
         self.assertIn('sheet.Cells(i + 3, 14).Value2 = inputs(i)', TABLE)
         self.assertIn('sheet.Range("N8").NumberFormat = "@"', TABLE)
         self.assertIn("sheet.Calculate", TABLE)
@@ -80,9 +85,20 @@ class SourceContracts(unittest.TestCase):
         self.assertIn("swUpdateDesignTableAll", TABLE)
         self.assertNotIn("N12", TABLE)
         self.assertNotIn(".Quit", TABLE)
-        self.assertIn("If Not changed Then", TABLE)
-        self.assertIn("VerifyModel originalOutputs", TABLE)
         self.assertLess(TABLE.index("Set sheet = Nothing"), TABLE.index("table.UpdateTable"))
+
+    def test_template_discard_order_and_failure_cleanup(self):
+        workflow = MODULE.split("Private Sub UIRunAutomation()", 1)[1]
+        success, failure = workflow.split("Failed:", 1)
+        self.assertLess(success.index("UICheckSaveStatuses statuses"), success.index("CloseDoc templatePath"))
+        self.assertLess(success.index("fso.FileExists(packedPath)"), success.index("CloseDoc templatePath"))
+        self.assertLess(success.index("Set tableSession = Nothing"), success.index("CloseDoc templatePath"))
+        self.assertLess(success.index("CloseDoc templatePath"), success.index("saveGuard.Restore"))
+        self.assertLess(success.index("saveGuard.Restore"), success.index("swApp.OpenDoc6"))
+        self.assertIn("GetOpenDocumentByName(templatePath)", success)
+        self.assertIn("UICloseTableEditor(tableSession)", failure)
+        self.assertNotIn("CloseDoc", failure)
+        self.assertNotIn("session.Restore", MODULE)
 
     def test_solidworks_boolean_checks_do_not_use_bitwise_not(self):
         for source in (MODULE, TABLE):
@@ -158,6 +174,8 @@ class PortableHelperTests(unittest.TestCase):
 Option Explicit
 Const TABLE_ERROR = -2147219304
 Dim model, configurationName, number, representation
+Dim saveGuard
+Set saveGuard = Nothing
 Class FakeConfiguration
     Public Name
 End Class
@@ -202,6 +220,10 @@ Sub ExpectFailure()
     Err.Clear
     On Error GoTo 0
     Assert number <> 0, "Expected a visible configuration/rebuild failure"
+End Sub
+Sub UITraceBegin(name)
+End Sub
+Sub UITraceEnd(name)
 End Sub
 '''
         script += "\n" + body + r'''

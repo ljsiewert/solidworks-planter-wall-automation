@@ -16,6 +16,33 @@ Public excludedFiles As Variant
 
 Private Const UI_ERROR As Long = vbObjectError + 2100
 Private uiRunning As Boolean
+Private runLogger As UIRunLogger
+
+' Change this on other machines; logs stay local and are ignored by Git.
+Public Const UI_LOG_FOLDER As String = _
+    "C:\Users\lsiewert\StudioProjects\solidworks-planter-wall-automation\run-logs"
+
+Public Function UIRunClock() As Double
+    Dim day As Date
+    Dim seconds As Double
+    Do
+        day = Date
+        seconds = CDbl(Timer)
+    Loop While day <> Date
+    UIRunClock = CDbl(day) * 86400# + seconds
+End Function
+
+Public Sub UITraceBegin(ByVal name As String)
+    If Not runLogger Is Nothing Then runLogger.BeginSpan name
+End Sub
+
+Public Sub UITraceEnd(ByVal name As String)
+    If Not runLogger Is Nothing Then runLogger.EndSpan name
+End Sub
+
+Public Sub UITraceDetail(ByVal name As String, ByVal text As String)
+    If Not runLogger Is Nothing Then runLogger.Detail name, text
+End Sub
 
 Public Sub RunWithUI()
     Dim form As UserForm_AutomationUI
@@ -28,6 +55,7 @@ Public Sub RunWithUI()
     On Error GoTo Failed
     uiRunning = True
     If Not packngo1.Step1_Initialize() Then GoTo Finished
+    UIRequireCleanTemplate packngo1.swModel
     If Not packngo1.Step2_ReadGlobals() Then GoTo Finished
     If StrComp(packngo1.GetFileName(packngo1.swModel.GetPathName), _
                "planter_assembly.SLDASM", vbTextCompare) <> 0 Then
@@ -101,7 +129,7 @@ Private Function UIProgressPlan() As Collection
     plan.Add "Collecting Pack-and-Go documents and rebuilding references"
     plan.Add "Creating output folder and applying part-number names"
     plan.Add "Saving Pack-and-Go files"
-    plan.Add "Restoring original template design table and rebuilding"
+    plan.Add "Closing original template without saving and releasing protection"
     plan.Add "Opening packed assembly"
     plan.Add "Rebuilding, verifying and saving packed assembly"
     If exportDXF Then plan.Add "Running DXF component exporter"
@@ -110,6 +138,14 @@ Private Function UIProgressPlan() As Collection
     If exportPDFComponents Then plan.Add "Running component PDF exporter"
     Set UIProgressPlan = plan
 End Function
+
+Public Sub UIRequireCleanTemplate(ByVal model As SldWorks.ModelDoc2)
+    If model.GetSaveFlag <> False Then
+        Err.Raise UI_ERROR, "UIRequireCleanTemplate", _
+            "The original template already has unsaved changes." & vbCrLf & _
+            "Save or discard them manually, then reopen a clean template before running UI mode."
+    End If
+End Sub
 
 Public Sub UIValidateDimensions(ByVal length As Double, ByVal width As Double, ByVal height As Double)
     If height < 6 Or height > 48 Then
@@ -377,6 +413,77 @@ Private Sub UIRunExport(ByVal packed As SldWorks.ModelDoc2, _
     End If
 End Sub
 
+Private Sub UICollectPackAndGoDocuments()
+    packngo1.usedManualFallback = False
+    Set packngo1.swPackAndGo = Nothing
+    ' Mirrors the manual Step4 sequence, with separate timing and API checks.
+    UITraceBegin "Collection ForceRebuild3"
+    If packngo1.swModel.ForceRebuild3(False) = False Then
+        Err.Raise UI_ERROR, "UICollectPackAndGoDocuments", "The template failed to rebuild before document collection."
+    End If
+    UITraceEnd "Collection ForceRebuild3"
+    UITraceBegin "GetPackAndGo"
+    Set packngo1.swPackAndGo = packngo1.swModel.Extension.GetPackAndGo
+    If packngo1.swPackAndGo Is Nothing Then
+        Err.Raise UI_ERROR, "UICollectPackAndGoDocuments", "Could not obtain the native Pack-and-Go object."
+    End If
+    UITraceEnd "GetPackAndGo"
+    UITraceBegin "Pack-and-Go IncludeDrawings"
+    packngo1.swPackAndGo.IncludeDrawings = True
+    UITraceEnd "Pack-and-Go IncludeDrawings"
+    packngo1.swPackAndGo.IncludeSimulationResults = False
+    packngo1.swPackAndGo.FlattenToSingleFolder = True
+    UITraceBegin "Pack-and-Go GetDocumentNames"
+    If packngo1.swPackAndGo.GetDocumentNames(packngo1.docNames) = False Then
+        Err.Raise UI_ERROR, "UICollectPackAndGoDocuments", _
+            "Native Pack-and-Go document collection failed. UI mode cannot safely rename the manual fallback list."
+    End If
+    packngo1.docCount = UBound(packngo1.docNames) + 1
+    UITraceEnd "Pack-and-Go GetDocumentNames"
+    UITraceDetail "Pack-and-Go options", "Drawings=True; SimulationResults=False; FlattenToSingleFolder=True"
+End Sub
+
+Private Sub UITraceSourceFiles()
+    Dim fso As Object
+    Dim i As Long
+    Dim bytes As Double
+    Dim failed As Long
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    UITraceBegin "Source metadata inventory"
+    For i = 0 To UBound(packngo1.docNames)
+        If UITraceSourceFile(fso, CStr(packngo1.docNames(i)), bytes) = False Then failed = failed + 1
+    Next i
+    UITraceEnd "Source metadata inventory"
+    UITraceDetail "Source inventory totals", "Documents=" & CStr(packngo1.docCount) & _
+        "; Bytes=" & UIInchesText(bytes) & "; Metadata failures=" & CStr(failed)
+    If failed > 0 Then
+        MsgBox CStr(failed) & " source-file metadata lookups failed; see the run log." & vbCrLf & _
+            "This diagnostic does not determine whether SolidWorks can pack these documents.", _
+            vbExclamation, "Source Access Diagnostics"
+    End If
+End Sub
+
+Private Function UITraceSourceFile(ByVal fso As Object, ByVal sourcePath As String, _
+                                  ByRef totalBytes As Double) As Boolean
+    Dim file As Object
+    Dim started As Double
+    Dim bytes As Double
+    Dim failure As String
+    started = UIRunClock()
+    On Error GoTo Failed
+    Set file = fso.GetFile(sourcePath)
+    bytes = CDbl(file.Size)
+    totalBytes = totalBytes + bytes
+    UITraceDetail "Source file", sourcePath & "; Bytes=" & UIInchesText(bytes) & _
+        "; MetadataSeconds=" & UIInchesText(UIRunClock() - started)
+    UITraceSourceFile = True
+    Exit Function
+Failed:
+    failure = Err.Description
+    UITraceDetail "Source metadata failure", sourcePath & "; Seconds=" & _
+        UIInchesText(UIRunClock() - started) & "; Error=" & failure
+End Function
+
 Private Sub UIRunAutomation()
     Dim template As SldWorks.ModelDoc2
     Dim tableSession As UIDesignTableSession
@@ -391,33 +498,52 @@ Private Sub UIRunAutomation()
     Dim fso As Object
     Dim progress As UIProgressSession
     Dim saveGuard As UIReferenceSaveGuard
+    Dim templatePath As String
+    Dim stillOpen As SldWorks.ModelDoc2
+    Dim logPath As String
+    Dim inputIndex As Long
 
     On Error GoTo Failed
+    Set runLogger = New UIRunLogger
+    runLogger.BeginRun UI_LOG_FOLDER
+    logPath = runLogger.Path
     Set progress = New UIProgressSession
     progress.BeginRun UIProgressPlan()
     Set template = packngo1.swModel
+    UIRequireCleanTemplate template
+    templatePath = template.GetPathName
+    UITraceDetail "Template", templatePath
+    UITraceDetail "SolidWorks revision", packngo1.swApp.RevisionNumber
+    UITraceDetail "Output parent", outputFolder
+    For inputIndex = 0 To 6
+        UITraceDetail "Input N" & CStr(inputIndex + 3), CStr(designTableInputs(inputIndex))
+    Next inputIndex
+    UITraceDetail "Exports", "Quote=" & CStr(quoteOnly) & "; DXF=" & CStr(exportDXF) & _
+        "; STEP=" & CStr(exportSTEP) & "; PDF assemblies=" & CStr(exportPDFAssemblies) & _
+        "; PDF components=" & CStr(exportPDFComponents)
     configurationName = template.ConfigurationManager.ActiveConfiguration.Name
+    UITraceDetail "Configuration", configurationName
     Set fso = CreateObject("Scripting.FileSystemObject")
     progress.NextStage
     UICheckExportFiles
     progress.NextStage
     Set tableSession = New UIDesignTableSession
     Set saveGuard = New UIReferenceSaveGuard
+    UITraceBegin "Reference protection preflight"
     saveGuard.BeginGuard packngo1.swApp, template
+    UITraceEnd "Reference protection preflight"
+    tableSession.SetSaveGuard saveGuard
     tableSession.Apply template, designTableInputs, expected
     progress.NextStage
     UIReadCalculatedGlobals template, expected
     UICheckDestination
+    UITraceDetail "Calculated planter lengths", "Center=" & packngo1.centerPlanterLength & _
+        "; side=" & packngo1.sidePlanterLength
 
     progress.NextStage
-    Set packngo1.swPackAndGo = Nothing
-    If Not packngo1.Step4_GetDocumentNames() Then
-        Err.Raise UI_ERROR, "UIRunAutomation", "Could not collect Pack-and-Go documents."
-    End If
-    If packngo1.usedManualFallback Then
-        Err.Raise UI_ERROR, "UIRunAutomation", _
-            "Native Pack-and-Go document collection failed. UI mode cannot safely rename the manual fallback list."
-    End If
+    UICollectPackAndGoDocuments
+    UITraceDetail "Pack-and-Go document count", CStr(packngo1.docCount)
+    UITraceSourceFiles
     UIVerifyDesignTableModel template, expected
     progress.NextStage
     UICreateDestination
@@ -428,8 +554,13 @@ Private Sub UIRunAutomation()
         Err.Raise UI_ERROR, "UIRunAutomation", "Could not apply the renamed document list."
     End If
     progress.NextStage
+    UITraceBegin "SavePackAndGo API"
     statuses = template.Extension.SavePackAndGo(packngo1.swPackAndGo)
+    UITraceEnd "SavePackAndGo API"
     UICheckSaveStatuses statuses
+    UITraceDetail "Pack-and-Go statuses", "All returned document statuses passed validation."
+    UITraceDetail "Pack-and-Go destination", packngo1.destFolder
+    UITraceDetail "Template inputs", "No original design-table input restoration will be performed."
     packedPath = packngo1.destFolder & packngo1.masterName & ".SLDASM"
     If Not fso.FileExists(packedPath) Then
         Err.Raise UI_ERROR, "UIRunAutomation", _
@@ -437,7 +568,18 @@ Private Sub UIRunAutomation()
     End If
 
     progress.NextStage
-    tableSession.Restore
+    saveGuard.ProtectLoadedReferences
+    Set tableSession = Nothing
+    Set template = Nothing
+    Set packngo1.swEqMgr = Nothing
+    Set packngo1.swPackAndGo = Nothing
+    Set packngo1.swModel = Nothing
+    packngo1.swApp.CloseDoc templatePath
+    Set stillOpen = packngo1.swApp.GetOpenDocumentByName(templatePath)
+    If Not stillOpen Is Nothing Then
+        Err.Raise UI_ERROR, "UIRunAutomation", _
+            "The original template remains loaded after CloseDoc. Check whether another document references it."
+    End If
     saveGuard.Restore
     progress.NextStage
     Set packed = packngo1.swApp.OpenDoc6(packedPath, swDocASSEMBLY, _
@@ -448,14 +590,19 @@ Private Sub UIRunAutomation()
     If warnings <> 0 Then
         Err.Raise UI_ERROR, "UIRunAutomation", "Packed assembly opened with warnings: " & CStr(warnings) & ". Review it before exporting."
     End If
+    UITraceDetail "Opened packed assembly", packed.GetPathName
     progress.NextStage
+    UITraceBegin "Packed assembly ForceRebuild3"
     If packed.ForceRebuild3(False) = False Then
         Err.Raise UI_ERROR, "UIRunAutomation", "The packed assembly failed to rebuild."
     End If
+    UITraceEnd "Packed assembly ForceRebuild3"
     UIVerifyDesignTableModel packed, expected
+    UITraceBegin "Packed assembly Save3"
     If packed.Save3(swSaveAsOptions_e.swSaveAsOptions_Silent, errors, warnings) = False Then
         Err.Raise UI_ERROR, "UIRunAutomation", "Cannot save the rebuilt packed assembly. SolidWorks error: " & CStr(errors)
     End If
+    UITraceEnd "Packed assembly Save3"
     If errors <> 0 Or warnings <> 0 Then
         Err.Raise UI_ERROR, "UIRunAutomation", "Packed assembly save reported errors/warnings: " & CStr(errors) & "/" & CStr(warnings)
     End If
@@ -478,19 +625,24 @@ Private Sub UIRunAutomation()
         UIRunExport packed, "pdfcomponents.swp", "RunPDFComponentDrawings"
     End If
     progress.Complete
+    runLogger.Finish "FINISHED", "Workflow returned; export success must be checked in exporter dialogs/logs."
+    Set runLogger = Nothing
 
     MsgBox "Pack-and-Go saved to:" & vbCrLf & packngo1.destFolder & vbCrLf & vbCrLf & _
            "Selected export macros have returned. Review their dialogs and logs for export results." & _
-           vbCrLf & "The original template remains open and was not saved.", _
+           vbCrLf & "The original template was closed without saving." & _
+           vbCrLf & "Run log: " & logPath, _
            vbInformation, "UI Workflow Finished"
     Exit Sub
 
 Failed:
     failureMessage = Err.Description
+    UITraceDetail "Workflow failure", failureMessage
+    UITraceBegin "Failure cleanup"
     If Not progress Is Nothing Then progress.RestoringAfterFailure
     If Not tableSession Is Nothing Then
-        If Not UIRestoreTable(tableSession) Then
-            failureMessage = failureMessage & vbCrLf & "Template restoration also failed."
+        If UICloseTableEditor(tableSession) = False Then
+            failureMessage = failureMessage & vbCrLf & "Design table editor cleanup also failed."
         End If
     End If
     If Not saveGuard Is Nothing Then
@@ -499,9 +651,15 @@ Failed:
         End If
     End If
     If Not progress Is Nothing Then progress.CloseWindow
+    If Not runLogger Is Nothing Then
+        UITraceEnd "Failure cleanup"
+        runLogger.Finish "FAILED", failureMessage
+    End If
+    Set runLogger = Nothing
     MsgBox failureMessage & vbCrLf & vbCrLf & _
            "Any partial output has been kept for inspection. No existing output was deleted." & _
-           vbCrLf & "Output: " & packngo1.destFolder, _
+           vbCrLf & "No template restoration was attempted. If the original is still open, close it without saving." & _
+           vbCrLf & "Output: " & packngo1.destFolder & vbCrLf & "Run log: " & logPath, _
            vbCritical, "UI Workflow Stopped"
 End Sub
 
@@ -516,12 +674,12 @@ Failed:
            vbCritical, "Reference Save Settings"
 End Function
 
-Private Function UIRestoreTable(ByVal session As UIDesignTableSession) As Boolean
+Private Function UICloseTableEditor(ByVal session As UIDesignTableSession) As Boolean
     On Error GoTo Failed
-    session.Restore
-    UIRestoreTable = True
+    session.CloseEditor
+    UICloseTableEditor = True
     Exit Function
 Failed:
-    MsgBox "Do not save the template until you review its design table." & vbCrLf & _
-           Err.Description, vbCritical, "Template Restore Failed"
+    MsgBox "Could not close the design table editor. Close it manually and do not save the template." & vbCrLf & _
+           Err.Description, vbCritical, "Design Table Cleanup"
 End Function

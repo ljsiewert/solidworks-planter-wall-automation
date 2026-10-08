@@ -16,10 +16,12 @@ Private readOnlyStates As Collection
 Private originalDiscard As Boolean
 Private preferenceChanged As Boolean
 Private appliedCount As Long
+Private references As Object
+Private tracked As Object
+Private templatePath As String
 
 Public Sub BeginGuard(ByVal application As SldWorks.SldWorks, ByVal template As SldWorks.ModelDoc2)
     Dim dependencies As Variant
-    Dim references As Object
     Dim documents As Variant
     Dim document As SldWorks.ModelDoc2
     Dim i As Long
@@ -28,6 +30,9 @@ Public Sub BeginGuard(ByVal application As SldWorks.SldWorks, ByVal template As 
     Set app = application
     Set paths = New Collection
     Set readOnlyStates = New Collection
+    Set tracked = CreateObject("Scripting.Dictionary")
+    tracked.CompareMode = vbTextCompare
+    templatePath = template.GetPathName
     Set references = CreateObject("Scripting.Dictionary")
     references.CompareMode = vbTextCompare
     dependencies = template.Extension.GetDependencies(True, True, False, False, False)
@@ -58,6 +63,7 @@ Public Sub BeginGuard(ByVal application As SldWorks.SldWorks, ByVal template As 
             End If
             paths.Add path
             readOnlyStates.Add CBool(document.IsOpenedReadOnly)
+            tracked(path) = True
         End If
     Next i
     originalDiscard = CBool(app.GetUserPreferenceToggle(swUserPreferenceToggle_e.swExtRefNoPromptOrSave))
@@ -75,6 +81,51 @@ Public Sub BeginGuard(ByVal application As SldWorks.SldWorks, ByVal template As 
             End If
             If document.IsOpenedReadOnly = False Then
                 Err.Raise GUARD_ERROR, "UIReferenceSaveGuard", "Template reference did not become read-only: " & CStr(paths(i))
+            End If
+        End If
+    Next i
+End Sub
+
+Public Sub ProtectLoadedReferences()
+    Dim documents As Variant
+    Dim document As SldWorks.ModelDoc2
+    Dim path As String
+    Dim i As Long
+
+    If Not preferenceChanged Then
+        Err.Raise GUARD_ERROR, "UIReferenceSaveGuard", "Reference protection is not active."
+    End If
+    app.SetUserPreferenceToggle swUserPreferenceToggle_e.swExtRefNoPromptOrSave, True
+    If app.GetUserPreferenceToggle(swUserPreferenceToggle_e.swExtRefNoPromptOrSave) = False Then
+        Err.Raise GUARD_ERROR, "UIReferenceSaveGuard", "Discard preference is no longer active."
+    End If
+    documents = app.GetDocuments
+    If Not IsArray(documents) Then
+        Err.Raise GUARD_ERROR, "UIReferenceSaveGuard", "Cannot refresh loaded template references."
+    End If
+    For i = LBound(documents) To UBound(documents)
+        Set document = documents(i)
+        path = document.GetPathName
+        If references.Exists(path) And StrComp(path, templatePath, vbTextCompare) <> 0 Then
+            If Not tracked.Exists(path) Then
+                If document.GetSaveFlag <> False Then
+                    Err.Raise GUARD_ERROR, "UIReferenceSaveGuard", _
+                        "A newly loaded reference has unsaved changes and was not checked at startup:" & _
+                        vbCrLf & path & vbCrLf & "Automatic discard is unsafe; review this document manually."
+                End If
+                paths.Add path
+                readOnlyStates.Add CBool(document.IsOpenedReadOnly)
+                tracked(path) = True
+            End If
+            appliedCount = paths.Count
+            ' Suppression/reload can reset the flag even for an originally protected path.
+            If document.IsOpenedReadOnly = False Then
+                If document.SetReadOnlyState(True) = False Then
+                    Err.Raise GUARD_ERROR, "UIReferenceSaveGuard", "Cannot re-protect template reference: " & path
+                End If
+            End If
+            If document.IsOpenedReadOnly = False Then
+                Err.Raise GUARD_ERROR, "UIReferenceSaveGuard", "Read-only protection was not retained: " & path
             End If
         End If
     Next i

@@ -32,12 +32,16 @@ Public Sub NextStage()
     Dim remaining As Double
     Dim i As Long
     Dim saved As String
-    If current > 0 Then durations(current) = DateDiff("s", stageStarted, Now)
+    If current > 0 Then
+        durations(current) = DateDiff("s", stageStarted, Now)
+        UITraceEnd "Stage: " & CStr(stages(current))
+    End If
     current = current + 1
     If current > stages.Count Then
         Err.Raise vbObjectError + 2300, "UIProgressSession", "Progress plan has fewer stages than the workflow."
     End If
     stageStarted = Now
+    UITraceBegin "Stage: " & CStr(stages(current))
     remaining = 0
     For i = current To stages.Count
         saved = GetSetting(SETTINGS_APP, SETTINGS_SECTION, CStr(stages(i)), "")
@@ -62,7 +66,7 @@ Public Sub RestoringAfterFailure()
     If form Is Nothing Then Exit Sub
     If current < 1 Then Exit Sub
     On Error GoTo Failed
-    form.UpdateProgress "Workflow stopped; restoring original design table...", _
+    form.UpdateProgress "Workflow stopped; closing table editor and releasing protection...", _
                         current - 1, stages.Count, DateDiff("s", started, Now), -1
     DoEvents
     Exit Sub
@@ -76,6 +80,7 @@ Public Sub Complete()
         Err.Raise vbObjectError + 2300, "UIProgressSession", "Progress completed before all planned stages ran."
     End If
     durations(current) = DateDiff("s", stageStarted, Now)
+    UITraceEnd "Stage: " & CStr(stages(current))
     form.UpdateProgress "Workflow returned; review export dialogs/logs for results.", _
                         stages.Count, stages.Count, DateDiff("s", started, Now), 0
     SaveTimings
