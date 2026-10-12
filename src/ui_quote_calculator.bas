@@ -243,10 +243,91 @@ Public Function UIQuoteReport(ByVal result As UIQuoteResult) As String
         "Next inputs needed: cutting/nesting rules and cutout treatment."
 End Function
 
+Public Function UIQuoteSummary(ByVal result As UIQuoteResult) As String
+    Dim text As String
+    If result.HasValidTotals Then
+        text = "PROFILE MATERIAL ESTIMATE: $" & FormatNumber(result.TotalMaterialCost, 2) & vbCrLf & _
+            "Profile weight: " & FormatNumber(result.TotalWeight, 2) & " lb    |    " & _
+            "Profile area: " & FormatNumber(result.TotalArea / 144, 2) & " ft^2" & vbCrLf
+    Else
+        text = "REVIEW REQUIRED - totals unavailable" & vbCrLf & result.Warnings & _
+            "Quantities, total weight and costs are withheld." & vbCrLf
+    End If
+    UIQuoteSummary = text & vbCrLf & _
+        result.Material & "  |  " & IIf(result.Thickness = 0.25, "1/4", "3/16") & _
+        " in  |  $" & FormatNumber(result.PricePerPound, 2) & "/lb" & vbCrLf & _
+        CStr(result.WallCount) & " walls  |  " & result.Orientation & "  |  " & result.ReturnLabel & vbCrLf & _
+        "Overall L x W x H: " & FormatNumber(result.OverallLength, 3) & " x " & _
+        FormatNumber(result.OverallWidth, 3) & " x " & FormatNumber(result.Height, 3) & " in"
+End Function
+
+Public Function UIQuoteComponentRows(ByVal result As UIQuoteResult) As Variant
+    UIQuoteComponentRows = UIQuoteTableRows(result, False)
+End Function
+
+Public Function UIQuoteGussetRows(ByVal result As UIQuoteResult) As Variant
+    UIQuoteGussetRows = UIQuoteTableRows(result, True)
+End Function
+
+Private Function UIQuoteTableRows(ByVal result As UIQuoteResult, ByVal gussets As Boolean) As Variant
+    Dim rows() As Variant
+    Dim part As UIQuoteComponent
+    Dim i As Long
+    Dim count As Long
+    Dim row As Long
+    Dim weightColumn As Long
+    For i = 0 To UBound(result.Components)
+        Set part = result.Components(i)
+        If (part.TopWidth > 0) = gussets Then count = count + 1
+    Next i
+    If count = 0 Then
+        Err.Raise vbObjectError + 2400, "UIQuoteTableRows", "No components found for the requested quote table."
+    End If
+    weightColumn = IIf(gussets, 5, 4)
+    ReDim rows(0 To count - 1, 0 To weightColumn + 1)
+    For i = 0 To UBound(result.Components)
+        Set part = result.Components(i)
+        If (part.TopWidth > 0) = gussets Then
+            rows(row, 0) = part.Name
+            rows(row, 2) = FormatNumber(part.Length, 3)
+            If gussets Then
+                rows(row, 3) = FormatNumber(part.TopWidth, 3)
+                rows(row, 4) = FormatNumber(part.Width, 3)
+            Else
+                rows(row, 3) = FormatNumber(part.Width, 3)
+            End If
+            If result.HasValidTotals Then
+                rows(row, 1) = FormatNumber(part.Quantity, 0)
+                rows(row, weightColumn) = FormatNumber(part.TotalWeight, 2)
+                rows(row, weightColumn + 1) = "$" & FormatNumber(part.TotalMaterialCost, 2)
+            Else
+                rows(row, 1) = "Review"
+                rows(row, weightColumn) = "Withheld"
+                rows(row, weightColumn + 1) = "Withheld"
+            End If
+            row = row + 1
+        End If
+    Next i
+    UIQuoteTableRows = rows
+End Function
+
+Public Function UIQuoteTotalRows(ByVal result As UIQuoteResult) As Variant
+    Dim rows(0 To 0, 0 To 2) As Variant
+    rows(0, 0) = "TOTAL MATERIAL - ALL COMPONENTS"
+    If result.HasValidTotals Then
+        rows(0, 1) = FormatNumber(result.TotalWeight, 2) & " lb"
+        rows(0, 2) = "$" & FormatNumber(result.TotalMaterialCost, 2)
+    Else
+        rows(0, 1) = "Withheld"
+        rows(0, 2) = "Withheld"
+    End If
+    UIQuoteTotalRows = rows
+End Function
+
 Public Sub UIShowQuote(ByVal result As UIQuoteResult)
     Dim report As UserForm_QuoteReport
     Set report = New UserForm_QuoteReport
-    report.SetReport UIQuoteReport(result)
+    report.SetResult result
     report.Show vbModal
     Unload report
 End Sub

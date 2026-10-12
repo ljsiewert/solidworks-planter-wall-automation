@@ -28,6 +28,8 @@ The five original macro sources remain unchanged by the UI integration.
   Excel, rebuilding, Pack-and-Go, exports or an output folder. Profile weight
   and material cost use a shared estimating steel density and an editable
   $/lb input defaulting to 0.70. All exports start unchecked.
+- Quote results open with a cost/weight/design summary and a compact component
+  table. Technical Details retains the full calculation report and assumptions.
 - Preview-only selection updates/rebuilds the unsaved template without
   Pack-and-Go or exports; export choices are cleared and disabled. Close
   without saving and reopen before the next run. Calculated center/side

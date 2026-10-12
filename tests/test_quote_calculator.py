@@ -12,9 +12,31 @@ MODULE = (ROOT / "src" / "userform_automation.bas").read_text(encoding="ascii")
 FORM = (ROOT / "src" / "UserForm_AutomationUI.frm").read_text(encoding="ascii")
 RESULT = (ROOT / "src" / "UIQuoteResult.cls").read_text(encoding="ascii")
 COMPONENT = (ROOT / "src" / "UIQuoteComponent.cls").read_text(encoding="ascii")
+REPORT_FORM = (ROOT / "src" / "UserForm_QuoteReport.frm").read_text(encoding="ascii")
 
 
 class QuoteTests(unittest.TestCase):
+    def test_summary_form_and_details_wiring(self):
+        self.assertNotRegex(REPORT_FORM, r"\bheading[ \t]+\.")
+        self.assertIn("heading.Top = 182", REPORT_FORM)
+        self.assertIn("report.SetResult result", CALCULATOR)
+        self.assertIn("summaryBox.Text = UIQuoteSummary(result)", REPORT_FORM)
+        self.assertIn("componentsBox.List = UIQuoteComponentRows(result)", REPORT_FORM)
+        self.assertIn("gussetsBox.List = UIQuoteGussetRows(result)", REPORT_FORM)
+        self.assertIn("totalsBox.List = UIQuoteTotalRows(result)", REPORT_FORM)
+        self.assertIn("gussetsBox.Visible = Not showingDetails", REPORT_FORM)
+        self.assertIn("totalsBox.Visible = Not showingDetails", REPORT_FORM)
+        self.assertIn("reportBox.Text = UIQuoteReport(result)", REPORT_FORM)
+        self.assertIn("Private WithEvents detailsButton", REPORT_FORM)
+        self.assertIn("Private Sub detailsButton_Click()", REPORT_FORM)
+        self.assertIn("reportBox.Visible = showingDetails", REPORT_FORM)
+        self.assertIn("heading.Visible = Not showingDetails", REPORT_FORM)
+        self.assertIn("summaryBox.Visible = Not showingDetails", REPORT_FORM)
+        self.assertIn("componentsBox.Visible = Not showingDetails", REPORT_FORM)
+        for warning in ("not a final manufacturing quote", "BORCON-specific density is unverified",
+                        "Holes/reliefs not deducted", "other heights are predictions"):
+            self.assertIn(warning, REPORT_FORM)
+
     def test_input_only_routing(self):
         entry = MODULE.split("Public Sub RunWithUI()", 1)[1].split("Public Sub UIDisableExports", 1)[0]
         self.assertLess(entry.index("form.Show vbModal"), entry.index("Step1_Initialize"))
@@ -45,6 +67,8 @@ class QuoteTests(unittest.TestCase):
             body = body.replace("Private Function", "Function").replace("Public Function", "Function")
             body = body.replace("Private Sub", "Sub")
             body = body.replace("parts(0 To 7)", "parts(7)")
+            body = body.replace("rows(0 To count - 1, 0 To weightColumn + 1)", "rows(count - 1, weightColumn + 1)")
+            body = body.replace("rows(0 To 0, 0 To 2)", "rows(0, 2)")
             if name == "UICalculateQuote":
                 body = body.replace("Optional ByVal pricePerPound = 0.7", "ByVal pricePerPound")
                 body = body.replace("UICalculateQuote", "UIQuoteWithPrice")
@@ -69,7 +93,7 @@ class QuoteTests(unittest.TestCase):
 Option Explicit
 SetLocale 1033
 Dim q, walls, length, width, thickness, orient, expected, boundary, report, code, i, part, total, ret, h, offset
-Dim other, price
+Dim other, price, summary, rows, gussetRows, totalRows, originalArea, originalWeight, originalCost
 Const UI_ERROR = 2100
 Sub Assert(condition, message)
     If Not condition Then
@@ -85,7 +109,9 @@ End Function
         component_fields = re.sub(r" As (?:String|Double)\b", "", COMPONENT.split("Option Explicit", 1)[1])
         script += "\nClass UIQuoteComponent\n" + component_fields + "\nEnd Class\n"
         for name in ("UICalculateQuote", "UIQuoteFlatHeight", "UIQuotePart",
-                     "UIQuoteComponents", "UIQuoteGussets", "UIQuoteReport"):
+                     "UIQuoteComponents", "UIQuoteGussets", "UIQuoteReport",
+                     "UIQuoteSummary", "UIQuoteComponentRows", "UIQuoteGussetRows",
+                     "UIQuoteTableRows", "UIQuoteTotalRows"):
             script += procedure(CALCULATOR, name) + "\n"
         for name in ("UIValidateSelections", "UIValidateDimensions", "UIInchesText", "UIParseInches"):
             script += procedure(MODULE, name) + "\n"
@@ -130,6 +156,32 @@ Set other = UICalculateQuote(4, "N/A", "Single return 1 inch", "Mild Steel", "3/
 Assert Abs(other.TotalArea - 71582.9430666667) < 0.000001, "User example area retained"
 Assert Abs(other.TotalWeight - 3806.4128265) < 0.00001, "User example weight"
 Assert InStr(report, "NOT CALCULATED") > 0, "No invented cost"
+originalArea = q.TotalArea
+originalWeight = q.TotalWeight
+originalCost = q.TotalMaterialCost
+summary = UIQuoteSummary(q)
+rows = UIQuoteComponentRows(q)
+Assert InStr(summary, "PROFILE MATERIAL ESTIMATE: $") = 1, "Summary leads with estimate"
+Assert InStr(summary, "1/4 in  |  $0.70/lb") > 0, "Readable thickness and price"
+Assert InStr(summary, "300.000 x 450.000 x 48.000 in") > 0, "Rounded summary dimensions"
+Assert InStr(summary, "CENTER_WALL_PATTERN_COUNT") = 0, "Technical equations not in summary"
+Assert UBound(rows, 1) = 5 And UBound(rows, 2) = 5, "Six wall/base/end rows"
+gussetRows = UIQuoteGussetRows(q)
+totalRows = UIQuoteTotalRows(q)
+Assert UBound(gussetRows, 1) = 1 And UBound(gussetRows, 2) = 6, "Two gusset rows and seven columns"
+Assert gussetRows(0, 0) = "Mounting Gusset" And gussetRows(1, 0) = "Center Gusset", "Gussets appear once in separate table"
+Assert gussetRows(0, 1) = "28" And gussetRows(1, 1) = "50", "Gusset quantities"
+Assert gussetRows(0, 2) = "45.650" And gussetRows(0, 3) = "7.750" And gussetRows(0, 4) = "23.250", "Height top width base width ordering"
+Assert gussetRows(0, 5) = FormatNumber(q.Components(6).TotalWeight, 2), "Gusset weight"
+Assert gussetRows(1, 6) = "$" & FormatNumber(q.Components(7).TotalMaterialCost, 2), "Gusset cost"
+Assert totalRows(0, 0) = "TOTAL MATERIAL - ALL COMPONENTS", "Combined total row label"
+Assert totalRows(0, 1) = FormatNumber(q.TotalWeight, 2) & " lb", "Total row weight includes gussets"
+Assert totalRows(0, 2) = "$" & FormatNumber(q.TotalMaterialCost, 2), "Total row cost from unrounded calculation"
+Assert rows(2, 0) = "Side Planter Wall" And rows(2, 1) = "8", "Table name and quantity"
+Assert rows(2, 2) = "112.375" And rows(2, 3) = "49.191", "Three decimal dimensions"
+Assert rows(2, 4) = FormatNumber(q.Components(2).TotalWeight, 2), "Two decimal weight"
+Assert rows(2, 5) = "$" & FormatNumber(q.Components(2).TotalMaterialCost, 2), "Two decimal cost"
+Assert q.TotalArea = originalArea And q.TotalWeight = originalWeight And q.TotalMaterialCost = originalCost, "Presentation does not round stored results"
 For walls = 1 To 4
     orient = "N/A"
     If walls = 2 Then orient = "Left"
@@ -201,6 +253,17 @@ Set q = UICalculateQuote(1, "N/A", "No return", "Mild Steel", "3/16 inch", 120.5
 Assert q.CenterSizingSegments = 2 And q.CenterPatternCount = 1, "Preserve source boundary discrepancy"
 report = UIQuoteReport(q)
 Assert InStr(report, "REVIEW REQUIRED") > 0 And InStr(report, "Derived center planter total:") = 0, "Withhold unreliable totals"
+summary = UIQuoteSummary(q)
+rows = UIQuoteComponentRows(q)
+Assert InStr(summary, "REVIEW REQUIRED") = 1, "Warnings visible in summary"
+Assert InStr(summary, "PROFILE MATERIAL ESTIMATE:") = 0, "No misleading estimate on mismatch"
+Assert InStr(summary, q.Warnings) > 0, "Summary preserves mismatch explanation"
+Assert rows(0, 1) = "Review" And rows(0, 4) = "Withheld" And rows(0, 5) = "Withheld", "Table withholds untrusted totals"
+gussetRows = UIQuoteGussetRows(q)
+totalRows = UIQuoteTotalRows(q)
+Assert totalRows(0, 1) = "Withheld" And totalRows(0, 2) = "Withheld", "Combined total withheld"
+Assert gussetRows(0, 1) = "Review" And gussetRows(0, 5) = "Withheld" And gussetRows(0, 6) = "Withheld", "Gusset totals withheld"
+Assert rows(0, 2) = "60.250", "Per-part dimensions still available"
 Set q = UICalculateQuote(1, "N/A", "No return", "Mild Steel", "3/16 inch", 100, 120.5, 10)
 Assert q.SideWallRuns = 0 And Len(q.Warnings) = 0, "Unused side discrepancy does not invalidate one wall"
 For Each orient In Array("Left", "Right")

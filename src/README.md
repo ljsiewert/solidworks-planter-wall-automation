@@ -123,8 +123,11 @@ Quote-only now uses only the validated UI inputs and VBA arithmetic. It does
 not access an active document, equation manager, design table, Excel or runtime
 logger. No clean template, destination folder or exporters are needed; no files
 are written. Launch `RunWithUI` even with no document open, choose **Quote only
-(input-only material estimate)** and click Run. A scrollable, read-only report allows
-selection/copying of quantities, profile weights and material-only costs.
+(input-only material estimate)** and click Run. The results window opens with
+a summary of material-only cost, profile weight/area and the selected design,
+followed by a wall/base/end component table and a separate gusset table.
+**Technical Details** switches to the
+full scrollable, copyable calculation report; **Back to Summary** returns.
 It is **not a final manufacturing quote**.
 No model changes need discarding after a quote.
 
@@ -233,7 +236,34 @@ at 0.70/lb is **$2664.49**.
 
 Updating an existing installation: replace `UserForm_AutomationUI`,
 `ui_quote_calculator`, `UIQuoteResult` and `UIQuoteComponent`, then compile
-and save. No change to the report form is required.
+and save.
+
+#### Results presentation
+
+The summary/table rounds displayed dimensions to three decimal inches and
+weights/costs to two decimal places. Quantities are whole numbers. The raw
+calculation values are not rounded or changed. Technical Details retains the
+equation names, per-part profile areas, trapezoid top widths, assumptions and
+full-precision calculation values from the earlier report.
+
+Table weights and costs are **quantity-extended totals**, not unit values.
+The final **TOTAL MATERIAL - ALL COMPONENTS** row below both tables shows the unrounded calculation's total
+weight and cost, formatted to two decimals; both are withheld on count mismatches.
+The width/height column is width for base plates and height for walls.
+The gusset table has explicit **Height**, **Top width** and **Base width**
+columns, plus quantity, total weight and material cost. Gussets are excluded
+from the wall/base/end table, but included in the combined total. Omitted components remain
+visible with quantity zero. A count mismatch replaces summary totals with
+the warning and marks table quantities/weights/costs as Review/Withheld.
+Estimate exclusions and calibration/density assumptions remain visible
+below either view.
+
+To update only this presentation on an already-installed version 3 quote
+calculator, replace `ui_quote_calculator` and the code behind the existing
+`UserForm_QuoteReport`, then compile and save. No new class or form is needed.
+Test both view transitions, Close/Escape, the reference examples, and a
+120.5-inch count-mismatch case. Layout/font fitting needs live MSForms
+validation; automated tests do not render the SolidWorks VBA window.
 
 ### Runtime logs and performance investigation
 
