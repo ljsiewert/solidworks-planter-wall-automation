@@ -33,6 +33,13 @@ button/shortcut pointing at that procedure.
    paste the entire [UserForm_AutomationProgress.frm](UserForm_AutomationProgress.frm)
    code into its code window. Like the input form, this is code-behind,
    not a directly importable form package.
+   For standalone quotes, import [UIQuoteResult.cls](UIQuoteResult.cls) as a
+   class and [ui_quote_calculator.bas](ui_quote_calculator.bas) as a standard
+   module. Insert a UserForm named `UserForm_QuoteReport` and paste the entire
+   [UserForm_QuoteReport.frm](UserForm_QuoteReport.frm) code behind it.
+   Import [UIQuoteComponent.cls](UIQuoteComponent.cls) as a class for the
+   component area breakdown. For an existing quote installation, replace
+   `UIQuoteResult` and `ui_quote_calculator` and add `UIQuoteComponent`.
 6. Ensure references to **SOLIDWORKS type library**, **SOLIDWORKS Constant
    type library**, and **Microsoft Forms 2.0 Object Library** are enabled.
    Inserting a UserForm normally adds the Forms reference automatically.
@@ -109,6 +116,124 @@ The preview still writes a local timing log (`RUN_PREVIEW` on completion).
 To install this UI change, replace `userform_automation` and the entire code
 behind the existing `UserForm_AutomationUI`, compile and save. No new class
 or form is required.
+
+### Standalone quote-only quantities
+
+Quote-only now uses only the validated UI inputs and VBA arithmetic. It does
+not access an active document, equation manager, design table, Excel or runtime
+logger. No clean template, destination folder or exporters are needed; no files
+are written. Launch `RunWithUI` even with no document open, choose **Quote only
+(input-only material estimate)** and click Run. A scrollable, read-only report allows
+selection/copying of quantities, profile weights and material-only costs.
+It is **not a final manufacturing quote**.
+No model changes need discarding after a quote.
+
+All export checkboxes start unchecked. Quote-only clears/disables every export,
+preview and the output folder/browser. Leaving quote mode reenables the controls
+without restoring old selections. Preview and full-model modes still require
+the original clean template. Model initialization/validation now occurs after
+form acceptance, only for those modes. The form no longer reads template
+equations to prefill choices: it uses existing UI globals when available,
+otherwise one wall, no return, Mild Steel and 3/16-inch thickness. Dimensions
+must be entered explicitly.
+
+Formula version 3 reproduces the supplied workbook N10/N11 and exported
+assembly equations:
+
+- Center available length is L for one wall, L - H/2 for two, L - H for
+  three/four. Sizing segments = ceiling(available/120); center length =
+  available/sizing segments.
+- Side sizing segments = ceiling(W/120). Side length = W/segments, plus
+  thickness + thickness*(segments-2)/segments when segments > 1.
+- Assembly center count = Int((available-1)/120)+1; assembly side count =
+  Int((W-1)/120)+1. These are **per wall run**, not overall totals.
+- Gussets per planter: 1 up to 24 inches, 2 up to 48, 3 up to 72, 4 up to 96,
+  otherwise 5, matching the source's inclusive thresholds.
+- One/two/three/four wall layouts infer respectively 1/1/1/2 center wall runs
+  and 0/1/2/2 side wall runs from the top-level suppression rules. Totals
+  multiply per-run counts; they must be checked against actual known designs.
+  Left/Right affects the
+  two-wall orientation, not these aggregate quantities.
+
+The source sizing/count rules disagree for fractional dimensions just above
+120-inch multiples (e.g. 120.5: ceiling gives 2, assembly count gives 1).
+The report preserves both rules, warns, and withholds aggregate totals for
+affected layouts. Unused side counts in one-wall layouts do not invalidate
+the center totals. Do not silently substitute a new count rule.
+
+Reference example: four walls, 300 x 450 x 48 inches, 1/4-inch Mild Steel,
+double return gives center length 84, side length 112.875, center pattern
+count 3, side count 4, center gussets 4, side gussets 5, mates 66 and 234.
+Totals: 6 center planters and 8 side planters. Following the supplied component
+specification, each planter has two mounting gussets and its gusset equation
+value minus one internal center gussets. This gives 28 mounting gussets and
+50 internal center gussets (78 total), replacing the earlier equation-value
+totals of 24 and 40, which were not physical component quantities.
+
+The component report implements [Component_Quote_Formulas.txt](../Component_Quote_Formulas.txt):
+
+- Eight groups: center wall/base, side wall/base, left/right ends, mounting
+  gussets and internal center gussets. Side wall variants share the supplied
+  dimensions and are aggregated rather than double-counted.
+- Side wall/base length = side planter length - 2*thickness, confirmed by the
+  user (112.875 - 0.5 = 112.375 inches in the reference example).
+- Left/right ends each occur once per side run, not once per side segment.
+- Walls use calibrated flat heights. For 1/4-inch material, single-return
+  offset is 0.5956 and double-return offset 1.1912 inches; for 3/16-inch,
+  0.6798 and 1.3595. A 2-inch single return adds one more inch. No return
+  adds nothing. Preserve the measured rounded double offset independently.
+  Measurements were supplied at H=48; other heights remain predictions,
+  including H=23.75. These are calibrated rules, not exact theoretical bend
+  calculations or live SolidWorks measurements.
+- Gusset height = H-2.1-T; bottom width = H/2-T-0.5; top width = bottom/3.
+  Area = (top+bottom)/2*height; both gusset types use that same trapezoid.
+- Each row reports material, thickness, governing rules, dimensions, profile
+  area, quantity and total area. Count mismatches withhold quantities and
+  aggregate areas; per-part dimensions/areas remain visible.
+- The reference double-return example totals 162600.4588 in^2 before any
+  cutout deduction. This is summed profile area, not purchased sheet area.
+
+Holes, notches and reliefs are **not deducted**: the supplied rectangular/
+trapezoidal profiles are explicitly labeled. 120 x 60-inch stock is context
+only. Sheet counts and purchased-sheet costs remain **NOT CALCULATED** until
+cutting/nesting rules and cutout treatment are established.
+The local workbook and `equations.txt` export remain Git-ignored.
+
+#### Profile weight and material pricing
+
+The quote-only **Quote material ($/lb)** input defaults to **0.70**, can be
+changed for each run, and is disabled/ignored for preview and full model runs.
+It accepts positive dot-decimal numbers, without currency symbols, commas,
+fractions or units. Zero/negative/missing prices produce explicit errors.
+The API also validates positive prices; its optional default is 0.70.
+
+Both Mild Steel and Borcon Weathering Steel use the user-approved estimating
+density **7850 kg/m^3**, converted as `7850 * 0.0254^3 / 0.45359237` =
+approximately **0.2835992422 lb/in^3**. This is a typical carbon-steel value,
+not a verified BORCON-specific material property:
+
+- [Carbon-steel density reference](https://lyhsteel.com/steel-calculators/metal-density-chart/)
+  lists 7850 kg/m^3 as an estimating value.
+- [Border Concepts BORCON product description](https://www.borderconcepts.com/products/border-line-steel-edging-borcon-borcon-l416)
+  identifies weathering steel but does not specify density or an ASTM grade.
+
+Weight = profile area * thickness * density; cost = weight * entered $/lb.
+Per-part and quantity-extended weights/costs are reported. Aggregate results
+are withheld on count mismatches. Calculations retain precision; displayed
+costs are formatted to two decimal places, and totals are calculated from
+unrounded values rather than summing rounded row displays.
+
+These are undeducted profile-material estimates, not true net solid mass.
+They exclude sheet offcuts, nesting losses, cutting/bending/welding/finishing,
+labor and margin. No density difference between material labels is invented;
+different purchase prices can be entered for each quote.
+For the 400 x 400 x 23.75-inch, four-wall, 3/16-inch, single 1-inch return
+example, profile weight is approximately **3806.4128 lb**, and material cost
+at 0.70/lb is **$2664.49**.
+
+Updating an existing installation: replace `UserForm_AutomationUI`,
+`ui_quote_calculator`, `UIQuoteResult` and `UIQuoteComponent`, then compile
+and save. No change to the report form is required.
 
 ### Runtime logs and performance investigation
 
@@ -276,8 +401,9 @@ Naming continues to use the existing `FormatPNDimension` rounding.
 
 `quoteOnly`, `exportPDFAssemblies`, `exportPDFComponents`, `exportDXF`,
 `exportSTEP`, and `outputFolder` are public in the new module. Quote-only
-forces assembly PDFs on and the other three exports off, matching manual
-mode. Unchecking quote-only re-enables the individual choices. Without
+clears every export and returns standalone quantities; the original manual
+macro's quote/PDF behavior is unchanged. Unchecking quote-only re-enables
+the individual choices without reselecting any. Without
 quote-only, all exports can be off for model-only output.
 
 ### Workflow and safeguards
@@ -287,7 +413,8 @@ quote-only, all exports can be off for model-only output.
   reference workbook) before opening the UI. Close the Excel/design-table
   editor first. Cancel, Escape, and closing the form do not run automation
   or edit the design table.
-- The wrapper reuses Steps 1-4, 6-7 and the existing naming/export helpers,
+- For model runs the wrapper reuses Step 1, Steps 3/6/7 and the existing
+  naming/export helpers, with instrumented UI collection instead of Step 4,
   but does not call `RunPackAndGo`, the interactive destination/save Steps
   5/8, or `PromptAndRunExports`. All option selections happen in the form.
 - The selected parent must already exist. Output goes to
@@ -400,8 +527,11 @@ for these acceptance checks:
    values after reopen. Verify N10:N11 formulas are unchanged. For the
    workbook's original 500 x 500 x 48-inch, four-wall, 1/4-inch setup,
    center length is 113 and side length is 100.4.
-5. Quote-only: only assembly PDFs are invoked. Then test the four export
-   choices independently and together, with all required `.swp` files deployed.
+5. Quote-only: with no document open, verify the report matches the reference
+   example above and no model/Excel/folder/export activity occurs. Also test
+   while an unrelated or dirty document is active: it must remain untouched.
+   Test the 120.5-inch discrepancy warning. Then test the four export choices
+   independently and together in normal model mode, with `.swp` files deployed.
 6. Repeat a part number in the same parent: fail without overwriting.
    Check permissions, unavailable macros and incompatible table layouts produce
    explicit errors, not success messages.

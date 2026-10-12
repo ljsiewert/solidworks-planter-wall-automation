@@ -16,6 +16,7 @@ Private thicknessBox As MSForms.ComboBox
 Private lengthBox As MSForms.TextBox
 Private widthBox As MSForms.TextBox
 Private heightBox As MSForms.TextBox
+Private priceBox As MSForms.TextBox
 Private folderBox As MSForms.TextBox
 Private pdfAssembliesBox As MSForms.CheckBox
 Private pdfComponentsBox As MSForms.CheckBox
@@ -33,7 +34,7 @@ Private Sub UserForm_Initialize()
 
     Me.Caption = "Planter Wall Automation"
     Me.Width = 470
-    Me.Height = 515
+    Me.Height = 545
     acceptedValue = False
 
     Set wallsBox = AddCombo("cboWallCount", "Wall count", 16, Array("1", "2", "3", "4"))
@@ -45,32 +46,36 @@ Private Sub UserForm_Initialize()
     Set heightBox = AddText("txtOverallHeight", "Overall height (in)", 166, "")
     Set materialBox = AddCombo("cboMaterial", "Material", 196, Array("Mild Steel", "Borcon Weathering Steel"))
     Set thicknessBox = AddCombo("cboThickness", "Material thickness", 226, Array("3/16 inch", "1/4 inch"))
-    Set folderBox = AddText("txtOutputFolder", "Output parent folder", 256, packngo1.packTestFolder)
+    Set priceBox = AddText("txtPricePerPound", "Quote material ($/lb)", 256, "0.70")
+    priceBox.Enabled = False
+    Set folderBox = AddText("txtOutputFolder", "Output parent folder", 286, packngo1.packTestFolder)
     folderBox.Width = 220
-    Set browseButton = AddButton("cmdBrowse", "...", 403, 256, 35)
+    Set browseButton = AddButton("cmdBrowse", "...", 403, 286, 35)
 
-    Set previewBox = AddCheck("chkPreviewOnly", "Preview only (no files created)", 16, 288)
-    Set quoteBox = AddCheck("chkQuoteOnly", "Quote only (assembly PDFs only)", 16, 318)
-    Set pdfAssembliesBox = AddCheck("chkPDFAssemblies", "PDF assemblies", 16, 350)
-    Set pdfComponentsBox = AddCheck("chkPDFComponents", "PDF components", 235, 350)
-    Set dxfBox = AddCheck("chkDXF", "DXF files", 16, 376)
-    Set stepBox = AddCheck("chkSTEP", "STEP files", 235, 376)
-    pdfAssembliesBox.Value = True
+    Set previewBox = AddCheck("chkPreviewOnly", "Preview only (no files created)", 16, 318)
+    Set quoteBox = AddCheck("chkQuoteOnly", "Quote only (input-only material estimate)", 16, 348)
+    Set pdfAssembliesBox = AddCheck("chkPDFAssemblies", "PDF assemblies", 16, 380)
+    Set pdfComponentsBox = AddCheck("chkPDFComponents", "PDF components", 235, 380)
+    Set dxfBox = AddCheck("chkDXF", "DXF files", 16, 406)
+    Set stepBox = AddCheck("chkSTEP", "STEP files", 235, 406)
 
     Set note = Me.Controls.Add("Forms.Label.1", "lblNotes", True)
-    note.Caption = "New output only; no overwrite. A PACK_TEST subfolder is added if needed." & vbCrLf & _
-                   "Selected export macros may still show status/error dialogs."
+    note.Caption = "Quote estimates profile material only, not purchased sheets or labor." & vbCrLf & _
+                   "Model runs require a clean template; no output overwrite."
     note.Left = 16
-    note.Top = 408
+    note.Top = 438
     note.Width = 425
     note.Height = 32
 
-    Set runButton = AddButton("cmdRun", "Run", 250, 448, 90)
+    Set runButton = AddButton("cmdRun", "Run", 250, 478, 90)
     runButton.Default = True
-    Set cancelButton = AddButton("cmdCancel", "Cancel", 348, 448, 90)
+    Set cancelButton = AddButton("cmdCancel", "Cancel", 348, 478, 90)
     cancelButton.Cancel = True
 
-    wallsBox.ListIndex = -1
+    wallsBox.ListIndex = 0
+    returnBox.ListIndex = 0
+    materialBox.ListIndex = 0
+    thicknessBox.ListIndex = 0
     For index = 0 To wallsBox.ListCount - 1
         If wallsBox.List(index) = packngo1.wallCount Then wallsBox.ListIndex = index
     Next index
@@ -176,15 +181,20 @@ End Sub
 Private Sub quoteBox_Click()
     If pdfAssembliesBox Is Nothing Then Exit Sub
     If quoteBox.Value Then
-        pdfAssembliesBox.Value = True
+        pdfAssembliesBox.Value = False
         pdfComponentsBox.Value = False
         dxfBox.Value = False
         stepBox.Value = False
+        previewBox.Value = False
     End If
     pdfAssembliesBox.Enabled = Not quoteBox.Value And Not previewBox.Value
     pdfComponentsBox.Enabled = Not quoteBox.Value And Not previewBox.Value
     dxfBox.Enabled = Not quoteBox.Value And Not previewBox.Value
     stepBox.Enabled = Not quoteBox.Value And Not previewBox.Value
+    previewBox.Enabled = Not quoteBox.Value
+    folderBox.Enabled = Not quoteBox.Value And Not previewBox.Value
+    browseButton.Enabled = Not quoteBox.Value And Not previewBox.Value
+    priceBox.Enabled = CBool(quoteBox.Value)
 End Sub
 
 Private Sub previewBox_Click()
@@ -222,6 +232,7 @@ Private Sub runButton_Click()
     Dim selectedFolder As String
     Dim gauge As String
     Dim material As String
+    Dim pricePerPound As Double
 
     On Error GoTo InvalidInput
     If wallsBox.ListIndex < 0 Then
@@ -234,7 +245,25 @@ Private Sub runButton_Click()
     height = ReadDimension(heightBox, "Overall height")
     UIValidateDimensions length, width, height
     selectedFolder = Trim$(folderBox.Text)
-    If Not previewBox.Value Then Call UIOutputRoot(selectedFolder)
+    If Not previewBox.Value And Not quoteBox.Value Then Call UIOutputRoot(selectedFolder)
+
+    quoteOnly = CBool(quoteBox.Value)
+    previewOnly = CBool(previewBox.Value)
+    Set quoteValues = Nothing
+    If quoteOnly Then
+        priceBox.SetFocus
+        pricePerPound = UIQuoteParsePrice(priceBox.Text)
+        Set quoteValues = UICalculateQuote(CLng(wallsBox.Value), CStr(sideBox.Value), _
+            CStr(returnBox.Value), CStr(materialBox.Value), CStr(thicknessBox.Value), length, width, height, pricePerPound)
+        exportPDFAssemblies = False
+        exportPDFComponents = False
+        exportDXF = False
+        exportSTEP = False
+        outputFolder = ""
+        acceptedValue = True
+        Me.Hide
+        Exit Sub
+    End If
 
     UIMapSelections CLng(wallsBox.Value), CStr(sideBox.Value), _
                     CStr(returnBox.Value), CStr(materialBox.Value), CStr(thicknessBox.Value)
@@ -247,7 +276,7 @@ Private Sub runButton_Click()
         UIReturnTableLabel(CStr(returnBox.Value)), length, width, height, gauge, material)
     outputFolder = selectedFolder
     quoteOnly = CBool(quoteBox.Value)
-    exportPDFAssemblies = quoteOnly Or CBool(pdfAssembliesBox.Value)
+    exportPDFAssemblies = Not quoteOnly And CBool(pdfAssembliesBox.Value)
     exportPDFComponents = Not quoteOnly And CBool(pdfComponentsBox.Value)
     exportDXF = Not quoteOnly And CBool(dxfBox.Value)
     exportSTEP = Not quoteOnly And CBool(stepBox.Value)

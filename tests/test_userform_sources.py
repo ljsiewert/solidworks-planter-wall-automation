@@ -38,7 +38,7 @@ class SourceContracts(unittest.TestCase):
         self.assertIn("Public Sub RunWithUI()", MODULE)
         self.assertIn("Set form = New UserForm_AutomationUI", MODULE)
         self.assertIn("form.Show vbModal", MODULE)
-        self.assertLess(MODULE.index("If form.Accepted Then"), MODULE.index("        UIRunAutomation"))
+        self.assertLess(MODULE.index("If form.Accepted Then"), MODULE.index("                UIRunAutomation"))
         for forbidden in (
             "packngo1.RunPackAndGo",
             "packngo1.Step5_SetDestination",
@@ -129,8 +129,8 @@ class SourceContracts(unittest.TestCase):
         ):
             self.assertIn(f"{flag} = Not quoteOnly And CBool({control}.Value)", FORM)
             self.assertIn(f"{control}.Value = False", FORM)
-        self.assertIn("exportPDFAssemblies = quoteOnly Or CBool(pdfAssembliesBox.Value)", FORM)
-        self.assertIn("pdfAssembliesBox.Value = True", FORM)
+        self.assertIn("exportPDFAssemblies = Not quoteOnly And CBool(pdfAssembliesBox.Value)", FORM)
+        self.assertNotIn("pdfAssembliesBox.Value = True", FORM)
         self.assertIn("UICheckExportFiles", FORM)
 
     def test_form_controls_and_events(self):

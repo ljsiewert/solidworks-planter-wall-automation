@@ -1,0 +1,293 @@
+PLANTER COMPONENT DIMENSIONS AND QUOTING RULES
+============================================
+
+User-supplied reference specification.
+This document records the supplied rules; it does not implement or independently
+validate them. Unresolved formulas and predictions are identified below.
+All lengths are in inches and areas in square inches unless otherwise stated.
+
+1. CENTER PLANTER COMPONENTS
+---------------------------
+
+Component: planter wall center
+  Length = center planter length
+  Flat-pattern height is determined by overall height and return type.
+  Flat face area = center planter length * flat-pattern height
+
+Component: Center Planter Base Plate
+  Length = center planter length
+  Width = overall height / 2
+  Flat face area = center planter length * (overall height / 2)
+
+The center wall uses the flat-pattern height, not just the nominal overall
+height, because its flange configuration affects the sheet material required.
+
+2. SIDE PLANTER COMPONENTS
+-------------------------
+
+Component: Side Planter Wall
+  Length = side planter length - (thickness * 2)
+  Flat-pattern height is determined by overall height and return type.
+  Flat face area = side planter wall length * flat-pattern height
+
+Component: Side Planter Base Plate
+  Length = side planter length - (thickness * 2)
+  Width = overall height / 2
+  Flat face area = side planter base plate length * (overall height / 2)
+
+CONFIRMED CORRECTION:
+The user confirmed subtraction, not division. For a side planter length of
+112.875 inches and thickness of 0.25 inches, the component length is 112.375.
+
+3. LEFT AND RIGHT SIDE WALLS
+---------------------------
+
+The leftsidewall and rightsidewall components are used only at the two ends
+of each side-planter run. Their quantity does not depend on the number of
+individual side planters in that run.
+
+Component: leftsidewall
+  Short dimension = overall height / 2
+  Flat-pattern height follows return type.
+  Flat face area = (overall height / 2) * flat-pattern height
+
+Component: rightsidewall
+  Short dimension = overall height / 2
+  Flat-pattern height follows return type.
+  Flat face area = (overall height / 2) * flat-pattern height
+
+Both components use the same material thickness as the other components.
+
+Quantity per main assembly:
+
+  Wall count | Side-planter runs | Left side walls | Right side walls
+  -----------|-------------------|-----------------|-----------------
+      4      |         2         |        2        |        2
+      3      |         2         |        2        |        2
+      2      |         1         |        1        |        1
+      1      |         0         |        0        |        0
+
+There is one left side wall and one right side wall per side-planter run.
+Do not multiply these quantities by the number of individual side planters.
+
+4. GUSSETS - MOUNTING AND CENTER
+-------------------------------
+
+Mounting gussets join adjacent planters together. Center gussets are the
+other gussets used within the planter structure.
+
+Both types use the same profile and dimension equations, whether used with
+center or side planters.
+
+Gusset dimensions:
+  Gusset height = overall height - 2.1 - thickness
+  Bottom width = (overall height / 2) - thickness - 0.5
+  Top width = bottom width / 3
+
+Flat face area:
+The profile has a flat top, a longer bottom, one vertical side and one diagonal
+side. Its profile area is calculated as a trapezoid.
+
+  Mounting Gusset area = ((top width + bottom width) / 2) * gusset height
+  Center Gusset area = ((top width + bottom width) / 2) * gusset height
+
+Example: 48-inch overall height with 1/4-inch material
+  Gusset height:             45.65 in
+  Bottom width:              23.25 in
+  Top width:                  7.75 in
+  Flat face area per gusset: 707.575 in^2
+  Area per gusset:            4.9137 ft^2
+
+Gusset quantities per individual planter:
+
+  Planter | Mounting gussets | Center gussets      | Total gussets
+  --------|------------------|---------------------|-------------------
+  Center  |        2         | CENTER_GUSSETS - 1  | CENTER_GUSSETS + 1
+  Side    |        2         | SIDE_GUSSETS - 1    | SIDE_GUSSETS + 1
+
+The main assembly provides CENTER_GUSSETS and SIDE_GUSSETS.
+
+Examples:
+  CENTER_GUSSETS = 4:
+    Each center planter has 2 mounting gussets and 3 center gussets, 5 total.
+  SIDE_GUSSETS = 5:
+    Each side planter has 2 mounting gussets and 4 center gussets, 6 total.
+
+Calculate these quantities per individual planter, then multiply by the total
+number of center or side planters in the assembly.
+
+5. WALL FLAT-PATTERN HEIGHT - RETURN TYPE
+---------------------------------------
+
+The main assembly's return type determines the wall flange configuration and
+flat-pattern height.
+
+  Return type 0: No flange
+    Flat height = overall height
+
+  Return type 1: Single 1-inch flange extending outward
+    Flat height = overall height + 1 - bend deduction
+
+  Return type 2: Single 2-inch flange extending outward
+    Flat height = overall height + 2 - bend deduction
+
+  Return type 3: Double return, 1 inch outward then 1 inch down
+    Flat height = overall height + 2 - (2 * bend deduction)
+
+Area for all planter walls:
+  A_wall = L_wall * H_flat
+
+SolidWorks-validated heights at 48-inch overall height
+(recorded as user-confirmed measurements):
+
+  Return | Configuration           | 1/4-inch material | 3/16-inch material
+  -------|-------------------------|-------------------|-------------------
+     0   | No flange               |     48.0000 in    |     48.0000 in
+     1   | Single 1-inch flange    |     48.5956 in    |     48.6798 in
+     2   | Single 2-inch flange    |     49.5956 in    |     49.6798 in
+     3   | Double 1-inch flange    |     49.1912 in    |     49.3595 in
+
+Sheet-metal settings:
+  Bend radius = 0.125 in
+  K-factor = 0.38
+  Auto relief = Rectangular, 0.5
+  Allowed thicknesses = 0.25 in and 0.1875 in
+
+Theoretical equations for a 90-degree bend:
+  BA = (pi / 2) * (R + K * T)
+  BD = 2 * (R + T) - BA
+
+  BA = bend allowance
+  BD = bend deduction
+  R = bend radius
+  K = K-factor
+  T = material thickness
+
+The theoretical calculation matches the 1/4-inch validation results. For
+3/16-inch material, it differs slightly from the supplied SolidWorks
+measurements. Until reconciled, use the measured SolidWorks results as the
+calibration reference rather than assume the theoretical calculation is exact.
+
+Additional test case: 23.75-inch overall height
+Using the same calibrated bend offsets, current predicted heights are:
+
+  Return type | 1/4-inch material | 3/16-inch material
+  ------------|-------------------|-------------------
+       0      |     23.7500 in    |     23.7500 in
+       1      |     24.3456 in    |     24.4298 in
+       2      |     25.3456 in    |     25.4298 in
+       3      |     24.9412 in    |     25.1095 in
+
+These values are predictions, not yet confirmed against SolidWorks at this
+overall height.
+
+6. MAIN ASSEMBLY - PLANTER COUNTS
+--------------------------------
+
+Reuse the logic in the main assembly equations sheet instead of creating a
+separate counting system. For standalone quoting, reproduce these rules from
+UI inputs without opening or updating the assembly/design table.
+
+Main assembly equations and purposes:
+  center wall pattern count:
+    Center planter count per applicable side.
+  sidewall planter count:
+    Side planter count per applicable side.
+  wall count:
+    Number of sides present in the main assembly.
+  CENTER_GUSSETS:
+    Center gusset count equation for each center planter.
+  SIDE_GUSSETS:
+    Center gusset count equation for each side planter.
+  return type:
+    Top flange configuration and wall flat-pattern height.
+  overall height:
+    Nominal planter height and other dimensions.
+  thickness:
+    Material thickness for dimensions and bend calculations.
+
+Use section 4 to convert the gusset equation values into physical mounting
+and center gusset quantities per planter.
+
+Planter count multipliers:
+
+  Wall count | Center planter multiplier | Side planter multiplier
+  -----------|---------------------------|------------------------
+      4      |             2             |            2
+      3      |             1             |            2
+      2      |             1             |            1
+      1      |             1             |            0
+
+These multipliers determine total center and side planters in the assembly.
+
+Example:
+  sidewall planter count = 4
+  center wall pattern count = 3
+  wall count = 4
+
+  Component                 | Quantity calculation       | Total
+  --------------------------|----------------------------|------
+  Side Planter Walls        | 4 * 2                      |   8
+  Side Planter Base Plates  | 4 * 2                      |   8
+  Center Planter Walls      | 3 * 2                      |   6
+  Center Planter Base Plates| 3 * 2                      |   6
+  Left Side Walls           | 1 * 2 side-planter runs     |   2
+  Right Side Walls          | 1 * 2 side-planter runs     |   2
+
+Once total center and side planter counts are known, calculate mounting and
+center gusset quantities using section 4.
+
+7. AREA AND MATERIAL CALCULATIONS FOR QUOTING
+-------------------------------------------
+
+Each component in the tracker requires:
+  Component name:
+    Identifies the part.
+  Planter type:
+    Center, side or shared component.
+  Material thickness:
+    Selects the material specification.
+  Governing equations:
+    References the main assembly equations.
+  Calculated dimensions:
+    Determines actual part size.
+  Flat-pattern height:
+    Accounts for wall return type.
+  Flat face area equation:
+    Defines how part area is calculated.
+  Area per component:
+    Flat face area for one part.
+  Quantity:
+    Total parts in the assembly.
+  Total component area:
+    Area per component * quantity.
+
+Total material area per component:
+  A_total = A_part * Q
+
+Sum total component areas, grouping by material thickness and material type
+as needed for the quote.
+
+IMPORTANT:
+Use the flat face area of the sheet-metal profile, not the full 3D surface
+area of the SolidWorks solid. Account for holes, cutouts and reliefs according
+to the chosen quoting treatment of scrap and material utilization.
+
+8. PROFILE WEIGHT AND MATERIAL PRICE
+-----------------------------------
+
+User-approved estimating density for BOTH Mild Steel and BORCON Weathering
+Steel: 7850 kg/m^3, approximately 0.2835992422 lb/in^3.
+This is a typical steel estimate, not a verified BORCON-specific property.
+Conversion: density in lb/in^3 = 7850 * (0.0254^3) / 0.45359237.
+
+Weight per component (lb) = flat profile area * thickness * density
+Total component weight = weight per component * quantity
+Material cost = weight * entered price per lb
+
+Quote price input defaults to 0.70 dollars/lb and is editable for each quote.
+Display monetary results to two decimal places; calculate with unrounded values.
+
+Weight/cost use the undeducted profiles above, not actual net solid mass.
+Purchased-sheet offcuts, nesting losses, fabrication, labor and margin are
+excluded. Sheet count and purchased-sheet cost still require cutting rules.

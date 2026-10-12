@@ -3,6 +3,7 @@ Option Explicit
 
 ' Import into the SAME VBA project as packngo1, not the exporter projects.
 Public quoteOnly As Boolean
+Public quoteValues As UIQuoteResult
 Public previewOnly As Boolean
 Public exportPDFAssemblies As Boolean
 Public exportPDFComponents As Boolean
@@ -55,29 +56,33 @@ Public Sub RunWithUI()
 
     On Error GoTo Failed
     uiRunning = True
-    If Not packngo1.Step1_Initialize() Then GoTo Finished
-    UIRequireCleanTemplate packngo1.swModel
-    If Not packngo1.Step2_ReadGlobals() Then GoTo Finished
-    If StrComp(packngo1.GetFileName(packngo1.swModel.GetPathName), _
-               "planter_assembly.SLDASM", vbTextCompare) <> 0 Then
-        Err.Raise UI_ERROR, "RunWithUI", "Start UI mode from the original planter_assembly.SLDASM template."
-    End If
-    packngo1.destFolder = ""
-
+    Set quoteValues = Nothing
     Set form = New UserForm_AutomationUI
     form.Show vbModal
     If form.Accepted Then
         Unload form
         Set form = Nothing
-        If previewOnly Then
-            UIRunPreview
+        If quoteOnly Then
+            UIShowQuote quoteValues
         Else
-            UIRunAutomation
+            If Not packngo1.Step1_Initialize() Then GoTo Finished
+            UIRequireCleanTemplate packngo1.swModel
+            If StrComp(packngo1.GetFileName(packngo1.swModel.GetPathName), _
+                       "planter_assembly.SLDASM", vbTextCompare) <> 0 Then
+                Err.Raise UI_ERROR, "RunWithUI", "Start model mode from the original planter_assembly.SLDASM template."
+            End If
+            packngo1.destFolder = ""
+            If previewOnly Then
+                UIRunPreview
+            Else
+                UIRunAutomation
+            End If
         End If
     End If
 
 Finished:
     If Not form Is Nothing Then Unload form
+    Set quoteValues = Nothing
     uiRunning = False
     Exit Sub
 

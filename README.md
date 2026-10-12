@@ -18,10 +18,16 @@ The five original macro sources remain unchanged by the UI integration.
 - One to four walls, with Left/Right orientation for two-wall layouts.
 - No return, single 1-inch return, single 2-inch return, or double return.
 - Overall length, width and height in decimal inches; center and side
-  planter lengths are calculated by the existing design table.
+  planter lengths are calculated by the design table for model runs or by
+  equivalent standalone formulas for quote-only.
 - Mild Steel or Borcon Weathering Steel, in 3/16-inch or 1/4-inch thickness.
 - Output folder selection, quote-only mode, and independent assembly PDF,
   component PDF, DXF and STEP selections.
+- Quote-only returns input-only component dimensions, quantities and profile
+  areas using the supplied component formulas, without opening a model,
+  Excel, rebuilding, Pack-and-Go, exports or an output folder. Profile weight
+  and material cost use a shared estimating steel density and an editable
+  $/lb input defaulting to 0.70. All exports start unchecked.
 - Preview-only selection updates/rebuilds the unsaved template without
   Pack-and-Go or exports; export choices are cleared and disabled. Close
   without saving and reopen before the next run. Calculated center/side
@@ -35,8 +41,8 @@ The five original macro sources remain unchanged by the UI integration.
 
 ## Install and run
 
-Requires Windows, SolidWorks with VBA support, and Microsoft Excel for the
-embedded design table.
+Requires Windows and SolidWorks with VBA support. Microsoft Excel and a clean
+template are required for model/preview runs, not input-only quoting.
 
 1. Back up the existing macro and use a disposable template copy for testing.
 2. Edit the existing Pack-and-Go `.swp` project in SolidWorks.

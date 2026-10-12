@@ -24,8 +24,8 @@ class PreviewTests(unittest.TestCase):
         self.assertIn("UICloseTableEditor(tableSession)", preview)
         self.assertIn("UIRestoreSaveGuard(saveGuard)", preview)
         self.assertIn('runLogger.Finish "PREVIEW"', preview)
-        self.assertIn("If previewOnly Then\n            UIRunPreview\n        Else", MODULE)
-        self.assertIn("If Not previewBox.Value Then Call UIOutputRoot(selectedFolder)", FORM)
+        self.assertIn("If previewOnly Then\n                UIRunPreview\n            Else", MODULE)
+        self.assertIn("If Not previewBox.Value And Not quoteBox.Value Then Call UIOutputRoot(selectedFolder)", FORM)
         self.assertEqual(preview.count('plan.Add "'), 2)
         self.assertEqual(preview.count("progress.NextStage"), 2)
 
@@ -39,7 +39,7 @@ class PreviewTests(unittest.TestCase):
             methods.append(body.replace("Private Sub", "Sub").replace("Public Sub", "Sub"))
         script = r'''
 Option Explicit
-Dim previewBox, quoteBox, folderBox, browseButton, pdfAssembliesBox, pdfComponentsBox, dxfBox, stepBox
+Dim previewBox, quoteBox, folderBox, browseButton, pdfAssembliesBox, pdfComponentsBox, dxfBox, stepBox, priceBox
 Dim quoteOnly, exportPDFAssemblies, exportPDFComponents, exportDXF, exportSTEP
 Class Control
     Public Value, Enabled
@@ -58,6 +58,7 @@ Set pdfAssembliesBox = New Control
 Set pdfComponentsBox = New Control
 Set dxfBox = New Control
 Set stepBox = New Control
+Set priceBox = New Control
 '''
         script += "\n".join(methods) + r'''
 quoteBox.Value = True
@@ -71,13 +72,21 @@ Assert Not quoteBox.Value And Not pdfAssembliesBox.Value And Not pdfComponentsBo
 Assert Not dxfBox.Value And Not stepBox.Value, "Preview clears DXF/STEP"
 Assert Not quoteBox.Enabled And Not pdfAssembliesBox.Enabled And Not stepBox.Enabled, "Preview disables export choices"
 Assert Not folderBox.Enabled And Not browseButton.Enabled, "Preview needs no destination"
+Assert Not priceBox.Enabled, "Preview ignores pricing"
 previewBox.Value = False
 previewBox_Click
 Assert quoteBox.Enabled And pdfAssembliesBox.Enabled And folderBox.Enabled, "Exiting preview reenables controls"
 Assert Not pdfAssembliesBox.Value And Not stepBox.Value, "Exiting preview does not restore hidden selections"
 quoteBox.Value = True
 quoteBox_Click
-Assert pdfAssembliesBox.Value And Not pdfAssembliesBox.Enabled, "Quote behavior preserved"
+Assert Not pdfAssembliesBox.Value And Not pdfAssembliesBox.Enabled, "Quote disables all PDFs"
+Assert Not folderBox.Enabled And Not browseButton.Enabled And Not previewBox.Enabled, "Quote needs no folder or preview"
+Assert priceBox.Enabled, "Quote enables editable pricing"
+quoteBox.Value = False
+quoteBox_Click
+Assert folderBox.Enabled And previewBox.Enabled And pdfAssembliesBox.Enabled, "Leaving quote reenables controls"
+Assert Not pdfAssembliesBox.Value, "Leaving quote does not reselect PDFs"
+Assert Not priceBox.Enabled, "Model runs do not validate price"
 quoteOnly = True
 exportPDFAssemblies = True
 exportPDFComponents = True
