@@ -17,6 +17,8 @@ Private lengthBox As MSForms.TextBox
 Private widthBox As MSForms.TextBox
 Private heightBox As MSForms.TextBox
 Private priceBox As MSForms.TextBox
+Private gapBox As MSForms.TextBox
+Private marginBox As MSForms.TextBox
 Private folderBox As MSForms.TextBox
 Private pdfAssembliesBox As MSForms.CheckBox
 Private pdfComponentsBox As MSForms.CheckBox
@@ -34,7 +36,7 @@ Private Sub UserForm_Initialize()
 
     Me.Caption = "Planter Wall Automation"
     Me.Width = 470
-    Me.Height = 545
+    Me.Height = 605
     acceptedValue = False
 
     Set wallsBox = AddCombo("cboWallCount", "Wall count", 16, Array("1", "2", "3", "4"))
@@ -48,28 +50,32 @@ Private Sub UserForm_Initialize()
     Set thicknessBox = AddCombo("cboThickness", "Material thickness", 226, Array("3/16 inch", "1/4 inch"))
     Set priceBox = AddText("txtPricePerPound", "Quote material ($/lb)", 256, "0.70")
     priceBox.Enabled = False
-    Set folderBox = AddText("txtOutputFolder", "Output parent folder", 286, packngo1.packTestFolder)
+    Set gapBox = AddText("txtPartGap", "Quote part gap (in)", 286, "0.25")
+    Set marginBox = AddText("txtEdgeMargin", "Quote edge margin (in)", 316, "0.25")
+    gapBox.Enabled = False
+    marginBox.Enabled = False
+    Set folderBox = AddText("txtOutputFolder", "Output parent folder", 346, packngo1.packTestFolder)
     folderBox.Width = 220
-    Set browseButton = AddButton("cmdBrowse", "...", 403, 286, 35)
+    Set browseButton = AddButton("cmdBrowse", "...", 403, 346, 35)
 
-    Set previewBox = AddCheck("chkPreviewOnly", "Preview only (no files created)", 16, 318)
-    Set quoteBox = AddCheck("chkQuoteOnly", "Quote only (input-only material estimate)", 16, 348)
-    Set pdfAssembliesBox = AddCheck("chkPDFAssemblies", "PDF assemblies", 16, 380)
-    Set pdfComponentsBox = AddCheck("chkPDFComponents", "PDF components", 235, 380)
-    Set dxfBox = AddCheck("chkDXF", "DXF files", 16, 406)
-    Set stepBox = AddCheck("chkSTEP", "STEP files", 235, 406)
+    Set previewBox = AddCheck("chkPreviewOnly", "Preview only (no files created)", 16, 378)
+    Set quoteBox = AddCheck("chkQuoteOnly", "Quote only (input-only material estimate)", 16, 408)
+    Set pdfAssembliesBox = AddCheck("chkPDFAssemblies", "PDF assemblies", 16, 440)
+    Set pdfComponentsBox = AddCheck("chkPDFComponents", "PDF components", 235, 440)
+    Set dxfBox = AddCheck("chkDXF", "DXF files", 16, 466)
+    Set stepBox = AddCheck("chkSTEP", "STEP files", 235, 466)
 
     Set note = Me.Controls.Add("Forms.Label.1", "lblNotes", True)
-    note.Caption = "Quote estimates profile material only, not purchased sheets or labor." & vbCrLf & _
-                   "Model runs require a clean template; no output overwrite."
+    note.Caption = "Quote gap/margin defaults are provisional; verify with Operations." & vbCrLf & _
+                   "Sheet layouts are estimates, not laser-ready cutting programs."
     note.Left = 16
-    note.Top = 438
+    note.Top = 498
     note.Width = 425
     note.Height = 32
 
-    Set runButton = AddButton("cmdRun", "Run", 250, 478, 90)
+    Set runButton = AddButton("cmdRun", "Run", 250, 538, 90)
     runButton.Default = True
-    Set cancelButton = AddButton("cmdCancel", "Cancel", 348, 478, 90)
+    Set cancelButton = AddButton("cmdCancel", "Cancel", 348, 538, 90)
     cancelButton.Cancel = True
 
     wallsBox.ListIndex = 0
@@ -195,6 +201,8 @@ Private Sub quoteBox_Click()
     folderBox.Enabled = Not quoteBox.Value And Not previewBox.Value
     browseButton.Enabled = Not quoteBox.Value And Not previewBox.Value
     priceBox.Enabled = CBool(quoteBox.Value)
+    gapBox.Enabled = CBool(quoteBox.Value)
+    marginBox.Enabled = CBool(quoteBox.Value)
 End Sub
 
 Private Sub previewBox_Click()
@@ -233,6 +241,8 @@ Private Sub runButton_Click()
     Dim gauge As String
     Dim material As String
     Dim pricePerPound As Double
+    Dim partGap As Double
+    Dim edgeMargin As Double
 
     On Error GoTo InvalidInput
     If wallsBox.ListIndex < 0 Then
@@ -253,8 +263,10 @@ Private Sub runButton_Click()
     If quoteOnly Then
         priceBox.SetFocus
         pricePerPound = UIQuoteParsePrice(priceBox.Text)
+        partGap = ReadClearance(gapBox, "Part gap")
+        edgeMargin = ReadClearance(marginBox, "Sheet edge margin")
         Set quoteValues = UICalculateQuote(CLng(wallsBox.Value), CStr(sideBox.Value), _
-            CStr(returnBox.Value), CStr(materialBox.Value), CStr(thicknessBox.Value), length, width, height, pricePerPound)
+            CStr(returnBox.Value), CStr(materialBox.Value), CStr(thicknessBox.Value), length, width, height, pricePerPound, partGap, edgeMargin)
         exportPDFAssemblies = False
         exportPDFComponents = False
         exportDXF = False
@@ -292,6 +304,14 @@ Private Sub runButton_Click()
 InvalidInput:
     MsgBox Err.Description, vbExclamation, "Review Form Inputs"
 End Sub
+
+Private Function ReadClearance(ByVal box As MSForms.TextBox, ByVal label As String) As Double
+    If Trim$(box.Text) = "0" Or Trim$(box.Text) = "0.0" Or Trim$(box.Text) = "0.00" Then
+        ReadClearance = 0
+    Else
+        ReadClearance = ReadDimension(box, label)
+    End If
+End Function
 
 Private Function ReadDimension(ByVal box As MSForms.TextBox, ByVal label As String) As Double
     On Error GoTo InvalidInput

@@ -30,6 +30,19 @@ The five original macro sources remain unchanged by the UI integration.
   $/lb input defaulting to 0.70. All exports start unchecked.
 - Quote results open with a cost/weight/design summary and a compact component
   table. Technical Details retains the full calculation report and assumptions.
+- A 120 x 60-inch sheet estimator nests rectangles and shape-aware opposed
+  gusset pairs, with 90-degree rotation and editable gap/margin assumptions.
+  It compares 24 split-based layouts and eight MaxRects layouts automatically,
+  then tries single/mixed gussets and least-used-sheet elimination, keeping
+  the lowest sheet count without regressing the earlier estimator.
+  It tries 24 deterministic guillotine layouts and reports the best estimate
+  for sheets, utilization and unused/scrap percentage. Operations verification
+  is required, and no laser toolpaths are generated.
+- **Preview Sheet Layout**, next to Technical Details, opens a PDF in the
+  default viewer with one stock sheet per page, component outlines and counts,
+  and utilization percentages. This is not a production cutting plan.
+- Results include a per-sheet **Unused / potential scrap** table and total,
+  distinguishing unused stock from material that must be discarded.
 - Preview-only selection updates/rebuilds the unsaved template without
   Pack-and-Go or exports; export choices are cleared and disabled. Close
   without saving and reopen before the next run. Calculated center/side

@@ -42,3 +42,15 @@ Public Density As Double
 Public PricePerPound As Double
 Public TotalWeight As Double
 Public TotalMaterialCost As Double
+Public NestAvailable As Boolean
+Public NestStatus As String
+Public PartGap As Double
+Public EdgeMargin As Double
+Public SheetCount As Long
+Public AreaMinimumSheets As Double
+Public UtilizationPercent As Double
+Public UnusedPercent As Double
+Public SheetPlacements As Variant
+Public NestMethod As String
+Public NestTrialCount As Long
+Public NestBaselineSheets As Long

@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import math
 
 ROOT = Path(__file__).resolve().parents[1]
 CALCULATOR = (ROOT / "src" / "ui_quote_calculator.bas").read_text(encoding="ascii")
@@ -13,29 +14,99 @@ FORM = (ROOT / "src" / "UserForm_AutomationUI.frm").read_text(encoding="ascii")
 RESULT = (ROOT / "src" / "UIQuoteResult.cls").read_text(encoding="ascii")
 COMPONENT = (ROOT / "src" / "UIQuoteComponent.cls").read_text(encoding="ascii")
 REPORT_FORM = (ROOT / "src" / "UserForm_QuoteReport.frm").read_text(encoding="ascii")
+NESTING = (ROOT / "src" / "ui_quote_nesting.bas").read_text(encoding="ascii")
+PDF = (ROOT / "src" / "ui_quote_layout_pdf.bas").read_text(encoding="ascii")
+
+def polygons_overlap(first, second):
+    """Separating-axis test for the convex profiles drawn in the preview."""
+    for polygon in (first, second):
+        for i, (x, y) in enumerate(polygon):
+            xx, yy = polygon[(i + 1) % len(polygon)]
+            axis = (y - yy, xx - x)
+            a = [px * axis[0] + py * axis[1] for px, py in first]
+            b = [px * axis[0] + py * axis[1] for px, py in second]
+            if max(a) <= min(b) + 1e-9 or max(b) <= min(a) + 1e-9:
+                return False
+    return True
+
+
+def polygon_clearance(first, second):
+    def point_segment(point, start, end):
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        t = max(0, min(1, ((point[0] - start[0]) * dx +
+                          (point[1] - start[1]) * dy) / (dx * dx + dy * dy)))
+        return math.hypot(point[0] - start[0] - t * dx,
+                          point[1] - start[1] - t * dy)
+    return min(point_segment(point, polygon[i], polygon[(i + 1) % len(polygon)])
+               for points, polygon in ((first, second), (second, first))
+               for point in points for i in range(len(polygon)))
 
 
 class QuoteTests(unittest.TestCase):
     def test_summary_form_and_details_wiring(self):
         self.assertNotRegex(REPORT_FORM, r"\bheading[ \t]+\.")
-        self.assertIn("heading.Top = 182", REPORT_FORM)
+        self.assertIn("heading.Top = 136", REPORT_FORM)
+        set_result = REPORT_FORM.split("Public Sub SetResult(", 1)[1].split("End Sub", 1)[0]
+        self.assertIn("FillTable(componentsBox, componentRows", set_result)
+        self.assertIn("FillTable(gussetsBox, gussetRows", set_result)
+        self.assertIn("FillTable sheetBox, sheetRows", set_result)
+        fill = REPORT_FORM.split("Private Function FillTable(", 1)[1].split("End Function", 1)[0]
+        self.assertIn("table.Height = contentHeight + 4", fill, "Tables are exactly as tall as their rows")
+        self.assertIn("contentHeight = (UBound(rows, 1) + 1) * ROW_HEIGHT", fill)
+        self.assertIn("table.ScrollBars = fmScrollBarsVertical", fill, "Long tables scroll internally")
+        self.assertNotIn("ListShowsAllRows", REPORT_FORM)
+        self.assertNotIn('"Forms.ListBox.1", "lstComponents"', REPORT_FORM)
         self.assertIn("report.SetResult result", CALCULATOR)
-        self.assertIn("summaryBox.Text = UIQuoteSummary(result)", REPORT_FORM)
-        self.assertIn("componentsBox.List = UIQuoteComponentRows(result)", REPORT_FORM)
-        self.assertIn("gussetsBox.List = UIQuoteGussetRows(result)", REPORT_FORM)
+        self.assertIn("cards = UIQuoteSummaryCards(result)", REPORT_FORM)
+        self.assertIn("tileValues(i).Caption = cards(i + 2, 1)", REPORT_FORM)
+        self.assertIn("componentRows = UIQuoteComponentRows(result)", REPORT_FORM)
+        self.assertIn("gussetRows = UIQuoteGussetRows(result)", REPORT_FORM)
         self.assertIn("totalsBox.List = UIQuoteTotalRows(result)", REPORT_FORM)
         self.assertIn("gussetsBox.Visible = Not showingDetails", REPORT_FORM)
         self.assertIn("totalsBox.Visible = Not showingDetails", REPORT_FORM)
+        self.assertIn("Private WithEvents pdfButton", REPORT_FORM)
+        self.assertIn("pdfButton.Enabled = result.NestAvailable", REPORT_FORM)
+        self.assertIn("UIPreviewQuoteLayoutPDF quoteResult", REPORT_FORM)
+        self.assertIn("CreateTextFile(path, False, False)", PDF)
+        self.assertIn('shell.ShellExecute path, "", "", "open", 1', PDF)
+        self.assertIn("fso.GetSpecialFolder(2)", PDF)
+        preview_handler = REPORT_FORM.split("Private Sub pdfButton_Click()", 1)[1].split("End Sub", 1)[0]
+        self.assertNotIn("BrowseForFolder", preview_handler)
         self.assertIn("reportBox.Text = UIQuoteReport(result)", REPORT_FORM)
         self.assertIn("Private WithEvents detailsButton", REPORT_FORM)
         self.assertIn("Private Sub detailsButton_Click()", REPORT_FORM)
         self.assertIn("reportBox.Visible = showingDetails", REPORT_FORM)
         self.assertIn("heading.Visible = Not showingDetails", REPORT_FORM)
-        self.assertIn("summaryBox.Visible = Not showingDetails", REPORT_FORM)
+        self.assertIn("item.Visible = Not showingDetails", REPORT_FORM)
+        self.assertNotIn("summaryBox", REPORT_FORM)
         self.assertIn("componentsBox.Visible = Not showingDetails", REPORT_FORM)
         for warning in ("not a final manufacturing quote", "BORCON-specific density is unverified",
                         "Holes/reliefs not deducted", "other heights are predictions"):
             self.assertIn(warning, REPORT_FORM)
+
+    def test_48_heuristic_trials_baseline32_and_flexible_gussets(self):
+        self.assertIn("For mode = 0 To 27", NESTING)
+        self.assertIn("If mode < 4 Or packMode >= 2 Or sortOrder >= 2 Then", NESTING)
+        trials = []
+        for mode in range(28):
+            if mode < 4:
+                sort_order = mode % 2
+                split_mode = mode // 2
+            else:
+                sort_order = (mode - 4) % 4
+                split_mode = (mode - 4) // 4
+            if mode < 4 or split_mode >= 2 or sort_order >= 2:
+                trials.append((sort_order, split_mode))
+        self.assertEqual(trials[:4], [(0, 0), (1, 0), (0, 1), (1, 1)])
+        self.assertEqual(len(trials), 24)
+        self.assertEqual(set(trials), {(order, split) for order in range(4) for split in range(6)})
+        # Baseline MaxRects: 4 sort orders x 2 rect heuristics = 8 trials
+        # Total baseline = 24 + 8 = 32 trials
+        # Flexible gussets: 2 policies (single=1, mixed=2) x 4 sort orders x 2 rect heuristics = 16 trials
+        # Total evaluated candidate layouts = 32 + 16 = 48 trials
+        self.assertIn("result.NestTrialCount = 48", NESTING)
+        self.assertIn("singleItems = UINestBuildItems(result, 1", NESTING)
+        self.assertIn("mixedItems = UINestBuildItems(result, 2", NESTING)
 
     def test_input_only_routing(self):
         entry = MODULE.split("Public Sub RunWithUI()", 1)[1].split("Public Sub UIDisableExports", 1)[0]
@@ -53,7 +124,7 @@ class QuoteTests(unittest.TestCase):
         self.assertNotIn("pdfAssembliesBox.Value = True", FORM)
         self.assertIn('256, "0.70"', FORM)
         self.assertIn("pricePerPound = UIQuoteParsePrice(priceBox.Text)", quote)
-        self.assertIn("height, pricePerPound)", quote)
+        self.assertIn("height, pricePerPound, partGap, edgeMargin)", quote)
         self.assertIn("UIQuoteParsePrice = UIParseInches(text)", CALCULATOR)
         self.assertIn("no currency symbol or commas", CALCULATOR)
         self.assertIn("Optional ByVal pricePerPound As Double = 0.7", CALCULATOR)
@@ -63,20 +134,35 @@ class QuoteTests(unittest.TestCase):
         def procedure(source, name):
             match = re.search(rf"^(?:Public|Private) (Function|Sub) {name}\b.*?^End \1$",
                               source, re.MULTILINE | re.DOTALL)
-            body = re.sub(r" As (?:Long|String|Double|Boolean|Variant|UIQuoteResult|UIQuoteComponent)\b", "", match[0])
+            body = re.sub(r" As (?:Long|String|Double|Boolean|Variant|Object|UIQuoteResult|UIQuoteComponent)\b", "", match[0])
             body = body.replace("Private Function", "Function").replace("Public Function", "Function")
             body = body.replace("Private Sub", "Sub")
+            body = body.replace("Public Sub", "Sub")
             body = body.replace("parts(0 To 7)", "parts(7)")
             body = body.replace("rows(0 To count - 1, 0 To weightColumn + 1)", "rows(count - 1, weightColumn + 1)")
             body = body.replace("rows(0 To 0, 0 To 2)", "rows(0, 2)")
+            body = re.sub(r"(\w+)\(0 To ([^\n,]+), 0 To ([^\n)]+)\)", r"\1(\2, \3)", body)
+            body = re.sub(r"(\w+)\(0 To ([^\n)]+)\)", r"\1(\2)", body)
+            body = body.replace("usedSheets(1 To sheets)", "usedSheets(sheets)")
             if name == "UICalculateQuote":
                 body = body.replace("Optional ByVal pricePerPound = 0.7", "ByVal pricePerPound")
+                body = body.replace("Optional ByVal partGap = 0.25", "ByVal partGap")
+                body = body.replace("Optional ByVal edgeMargin = 0.25", "ByVal edgeMargin")
                 body = body.replace("UICalculateQuote", "UIQuoteWithPrice")
             body = re.sub(r"^(\s*Next) \w+$", r"\1", body, flags=re.MULTILINE)
             body = re.sub(r"\bTrim\$", "Trim", body)
             body = re.sub(r"\bMid\$", "Mid", body)
+            body = body.replace("Right$(", "Right(").replace("Format$(", "FormatNumberPDF(")
+            body = body.replace("Left$(", "Left(")
+            body = body.replace("ByRef offsets()", "ByRef offsets").replace("ByRef gussets()", "ByRef gussets").replace("0#", "0")
             body = body.replace("Str$(value)", "CStr(value)")
             body = body.replace("Val(cleaned)", "CDbl(cleaned)")
+            if name == "UISaveQuoteLayoutPDF":
+                body = body.split("Failed:", 1)[0].replace("On Error GoTo Failed", "") + "End Sub"
+            if name == "UIPreviewQuoteLayoutPDF":
+                body = body.replace('CreateObject("Shell.Application")', "New LayoutShell")
+            if name == "UIPDFSheet":
+                body = body.replace("Dim quantities(7)", "Dim quantities(7)\n    For i = 0 To 7\n        quantities(i) = 0\n    Next")
             if name == "UIQuoteParsePrice":
                 body = body.replace("On Error GoTo InvalidPrice", "On Error Resume Next\n    Err.Clear")
                 body = body.replace("    Exit Function\nInvalidPrice:", "    If Err.Number = 0 Then Exit Function\n    On Error GoTo 0")
@@ -94,6 +180,10 @@ Option Explicit
 SetLocale 1033
 Dim q, walls, length, width, thickness, orient, expected, boundary, report, code, i, part, total, ret, h, offset
 Dim other, price, summary, rows, gussetRows, totalRows, originalArea, originalWeight, originalCost
+Dim p, r, j, dx, dy, sheetArea, physicalCount, gap, margin, pairedCount, customItems(0, 4), customSheets
+Dim heuristicItems(7, 4), trialItems, trialWidths, trialHeights, legacyBest, extraBest, trialSheets, sortOrder, splitMode
+Dim maxItems(9, 4), maxBest, seenMax, stressItems(95, 4)
+Dim pdfText, pdfFile, pdfFSO, previewPath
 Const UI_ERROR = 2100
 Sub Assert(condition, message)
     If Not condition Then
@@ -104,22 +194,213 @@ End Sub
 Function IIf(condition, yes, no)
     If condition Then IIf = yes Else IIf = no
 End Function
+Function FormatNumberPDF(value, pattern)
+    FormatNumberPDF = FormatNumber(value, 2, -1, 0, 0)
+End Function
+Class LayoutShell
+    Sub ShellExecute(path, args, directory, action, show)
+        Assert action = "open", "Preview uses default viewer"
+        Assert Right(path, 4) = ".pdf", "Preview launches PDF"
+        previewPath = path
+    End Sub
+End Class
 '''
         script += "\nClass UIQuoteResult\n" + fields + "\nEnd Class\n"
         component_fields = re.sub(r" As (?:String|Double)\b", "", COMPONENT.split("Option Explicit", 1)[1])
         script += "\nClass UIQuoteComponent\n" + component_fields + "\nEnd Class\n"
         for name in ("UICalculateQuote", "UIQuoteFlatHeight", "UIQuotePart",
                      "UIQuoteComponents", "UIQuoteGussets", "UIQuoteReport",
-                     "UIQuoteSummary", "UIQuoteComponentRows", "UIQuoteGussetRows",
-                     "UIQuoteTableRows", "UIQuoteTotalRows"):
+                     "UIQuoteSummaryCards", "UIQuoteComponentRows", "UIQuoteGussetRows",
+                     "UIQuoteTableRows", "UIQuoteTotalRows", "UIQuoteSheetStats", "UIQuoteSheetRows"):
             script += procedure(CALCULATOR, name) + "\n"
         for name in ("UIValidateSelections", "UIValidateDimensions", "UIInchesText", "UIParseInches"):
             script += procedure(MODULE, name) + "\n"
         script += procedure(CALCULATOR, "UIQuoteParsePrice") + "\n"
+        for name in ("UINestQuote", "UINestSort", "UINestMax", "UINestPack", "UINestMaxRects",
+                     "UINestFreeAdd", "UINestFreePrune", "UINestReport", "UINestBuildItems",
+                     "UINestFreeSubtract", "UINestEliminateSheet"):
+            script += procedure(NESTING, name) + "\n"
+        for name in ("UIQuoteLayoutPDF", "UIPDFObject", "UIPDFSummary", "UIPDFUsage", "UIPDFSheet", "UIPDFComponentIndex", "UIPDFOutline",
+                     "UIPDFText", "UIPDFStyledText", "UIPDFRightText", "UIPDFRect", "UIPDFHeader", "UIPDFCard",
+                     "UIPDFStep", "UIPDFFact", "UIPDFParts", "UIPDFPartCounts", "UIPDFPartLabel", "UISaveQuoteLayoutPDF", "UIPreviewQuoteLayoutPDF"):
+            script += procedure(PDF, name) + "\n"
         script += r'''
 Function UICalculateQuote(walls, orient, ret, material, thickness, length, width, height)
-    Set UICalculateQuote = UIQuoteWithPrice(walls, orient, ret, material, thickness, length, width, height, 0.7)
+    Set UICalculateQuote = UIQuoteWithPrice(walls, orient, ret, material, thickness, length, width, height, 0.7, 0.25, 0.25)
 End Function
+Sub CheckNest(q)
+    Dim p, i, j, dx, dy, area, parts, pairs, gap, margin, occurrences, labels
+    Assert q.NestAvailable And q.SheetCount > 0, "Nesting available"
+    p = q.SheetPlacements
+    gap = q.PartGap
+    margin = q.EdgeMargin
+    area = 0
+    parts = 0
+    pairs = 0
+    For i = 0 To UBound(p)
+        Assert p(i, 0) >= 1 And p(i, 0) <= q.SheetCount, "Placement sheet"
+        Assert p(i, 2) >= margin - 0.000001 And p(i, 3) >= margin - 0.000001, "Near edge margin"
+        Assert p(i, 2) + p(i, 4) <= 120 - margin + 0.000001, "Far length margin"
+        Assert p(i, 3) + p(i, 5) <= 60 - margin + 0.000001, "Far width margin"
+        Assert p(i, 6) = 0 Or p(i, 6) = 90, "Allowed bundle rotation"
+        area = area + p(i, 7)
+        parts = parts + p(i, 8)
+        If p(i, 8) = 2 Then
+            pairs = pairs + 1
+            dx = gap * Sqr(1 + ((q.GussetBottomWidth - q.GussetTopWidth) / q.GussetHeight)^2)
+            Assert Abs(dx * q.GussetHeight / Sqr(q.GussetHeight^2 + (q.GussetBottomWidth-q.GussetTopWidth)^2) - gap) < 0.000001, "Gusset pair perpendicular gap"
+        End If
+        For j = i + 1 To UBound(p)
+            If p(i, 0) = p(j, 0) Then
+                Assert p(i, 2) + p(i, 4) + gap <= p(j, 2) + 0.000001 Or _
+                       p(j, 2) + p(j, 4) + gap <= p(i, 2) + 0.000001 Or _
+                       p(i, 3) + p(i, 5) + gap <= p(j, 3) + 0.000001 Or _
+                       p(j, 3) + p(j, 5) + gap <= p(i, 3) + 0.000001, "No overlap; minimum bundle gap"
+            End If
+        Next
+    Next
+    Assert pairs > 0, "Shape-aware pairs placed"
+    dx = 0
+    For i = 0 To UBound(q.Components)
+        dx = dx + q.Components(i).Quantity
+    Next
+    Assert parts = dx, "All physical components placed exactly once"
+    For i = 0 To UBound(q.Components)
+        occurrences = 0
+        For j = 0 To UBound(p)
+            labels = Split(Replace(p(j, 1), " (opposed pair)", ""), " + ")
+            For Each dx In labels
+                If dx = q.Components(i).Name Then occurrences = occurrences + 1
+            Next
+        Next
+        Assert occurrences = q.Components(i).Quantity, "Each component type quantity conserved"
+    Next
+    Assert Abs(area - q.TotalArea) < 0.000001, "Profile areas conserved, not envelope areas"
+    Assert q.SheetCount >= q.AreaMinimumSheets, "Sheet count above area lower bound"
+    Assert Abs(q.UtilizationPercent + q.UnusedPercent - 100) < 0.000001, "Scrap complement"
+    Assert Abs(q.UtilizationPercent - 100 * area / (7200 * q.SheetCount)) < 0.000001, "Full-sheet utilization basis"
+    Assert q.NestTrialCount = 48, "48 candidate layouts evaluated"
+    Assert Len(q.NestMethod) > 0, "NestMethod populated"
+    Assert q.NestBaselineSheets >= q.SheetCount, "Sheet count no worse than baseline"
+    CheckNoRegression q
+End Sub
+Sub CheckNoRegression(q)
+    Dim items, totalGussets, i, j, k, part, pairFits, pairWidth, dx, gussets(), count, baseline, sortOrder, splitMode, sheets, trial
+    Assert q.SheetCount <= q.NestBaselineSheets, "Nesting is no worse than the prior 32 baseline layouts"
+    If q.SheetCount <= q.AreaMinimumSheets And q.NestBaselineSheets = q.SheetCount Then
+        Exit Sub
+    End If
+    totalGussets = q.Components(6).Quantity + q.Components(7).Quantity
+    pairWidth = q.GussetBottomWidth + q.GussetTopWidth + q.PartGap * Sqr(1 + ((q.GussetBottomWidth - q.GussetTopWidth) / q.GussetHeight)^2)
+    pairFits = (pairWidth <= 120 - 2 * q.EdgeMargin And q.GussetHeight <= 60 - 2 * q.EdgeMargin) Or _
+               (q.GussetHeight <= 120 - 2 * q.EdgeMargin And pairWidth <= 60 - 2 * q.EdgeMargin)
+    count = 0
+    For i = 0 To 5
+        count = count + q.Components(i).Quantity
+    Next
+    If pairFits Then
+        count = count + Int(totalGussets / 2) + (totalGussets Mod 2)
+    Else
+        count = count + totalGussets
+    End If
+    ReDim items(count - 1, 4)
+    k = 0
+    For i = 0 To 5
+        Set part = q.Components(i)
+        For j = 1 To part.Quantity
+            items(k, 0) = part.Name
+            items(k, 1) = part.Length
+            items(k, 2) = part.Width
+            items(k, 3) = part.Area
+            items(k, 4) = 1
+            k = k + 1
+        Next
+    Next
+    ReDim gussets(totalGussets)
+    j = 0
+    For i = 1 To q.Components(6).Quantity
+        gussets(j) = q.Components(6).Name
+        j = j + 1
+    Next
+    For i = 1 To q.Components(7).Quantity
+        gussets(j) = q.Components(7).Name
+        j = j + 1
+    Next
+    If pairFits Then
+        For i = 0 To Int(totalGussets / 2) - 1
+            items(k, 0) = gussets(i * 2) & " + " & gussets(i * 2 + 1) & " (opposed pair)"
+            items(k, 1) = pairWidth
+            items(k, 2) = q.GussetHeight
+            items(k, 3) = (q.GussetTopWidth + q.GussetBottomWidth) * q.GussetHeight
+            items(k, 4) = 2
+            k = k + 1
+        Next
+        If (totalGussets Mod 2) = 1 Then
+            items(k, 0) = gussets(totalGussets - 1)
+            items(k, 1) = q.GussetBottomWidth
+            items(k, 2) = q.GussetHeight
+            items(k, 3) = (q.GussetTopWidth + q.GussetBottomWidth) / 2 * q.GussetHeight
+            items(k, 4) = 1
+            k = k + 1
+        End If
+    Else
+        For i = 0 To totalGussets - 1
+            items(k, 0) = gussets(i)
+            items(k, 1) = q.GussetBottomWidth
+            items(k, 2) = q.GussetHeight
+            items(k, 3) = (q.GussetTopWidth + q.GussetBottomWidth) / 2 * q.GussetHeight
+            items(k, 4) = 1
+            k = k + 1
+        Next
+    End If
+    baseline = count + 2
+    For sortOrder = 0 To 3
+        UINestSort items, sortOrder
+        For splitMode = 0 To 5
+            trial = UINestPack(items, 120 - 2 * q.EdgeMargin, 60 - 2 * q.EdgeMargin, _
+                               q.PartGap, q.EdgeMargin, splitMode, sheets)
+            If sheets < baseline Then baseline = sheets
+        Next
+        For splitMode = 0 To 1
+            trial = UINestMaxRects(items, 120 - 2 * q.EdgeMargin, 60 - 2 * q.EdgeMargin, _
+                                  q.PartGap, q.EdgeMargin, splitMode, sheets)
+            If sheets < baseline Then baseline = sheets
+        Next
+    Next
+    Assert q.SheetCount <= baseline, "Nesting is no worse than the prior 32 baseline layouts"
+    Assert q.NestBaselineSheets = baseline, "Reported baseline matches independent 32 baseline evaluation"
+End Sub
+Sub CheckMaxRects(items, placements, sheetLength, sheetWidth, gap, margin, sheets)
+    Dim i, j, dx, dy, used, area, expectedArea, seen
+    Set seen = CreateObject("Scripting.Dictionary")
+    area = 0
+    expectedArea = 0
+    Assert UBound(items) = UBound(placements), "MaxRects retains item count"
+    For i = 0 To UBound(placements)
+        Assert placements(i, 0) >= 1 And placements(i, 0) <= sheets, "MaxRects sheet index"
+        Assert placements(i, 2) >= margin - 0.000001 And placements(i, 3) >= margin - 0.000001, "MaxRects near margins"
+        Assert placements(i, 2) + placements(i, 4) <= margin + sheetLength + 0.000001, "MaxRects far length"
+        Assert placements(i, 3) + placements(i, 5) <= margin + sheetWidth + 0.000001, "MaxRects far width"
+        Assert placements(i, 6) = 0 Or placements(i, 6) = 90, "MaxRects supported rotation"
+        Assert Not seen.Exists(placements(i, 1)), "MaxRects no duplicate items"
+        seen.Add placements(i, 1), True
+        area = area + placements(i, 7)
+        expectedArea = expectedArea + items(i, 3)
+        For j = 0 To i - 1
+            If placements(i, 0) = placements(j, 0) Then
+                dx = UINestMax(placements(j, 2) - placements(i, 2) - placements(i, 4), _
+                              placements(i, 2) - placements(j, 2) - placements(j, 4))
+                dy = UINestMax(placements(j, 3) - placements(i, 3) - placements(i, 5), _
+                              placements(i, 3) - placements(j, 3) - placements(j, 5))
+                Assert dx >= gap - 0.000001 Or dy >= gap - 0.000001, "MaxRects excludes occupied space and reserves clearance"
+            End If
+        Next
+    Next
+    Assert Abs(area - expectedArea) < 0.000001, "MaxRects profile area conservation"
+    For i = 0 To UBound(items)
+        Assert seen.Exists(items(i, 0)), "MaxRects all input identities present"
+    Next
+End Sub
 '''
         script += r'''
 Set q = UICalculateQuote(4, "N/A", "Double return", "Mild Steel", "1/4 inch", 300, 450, 48)
@@ -149,7 +430,7 @@ Assert Abs(q.Density - 0.283599242) < 0.000000001, "7850 kg/m3 converted to lb/i
 Assert q.PricePerPound = 0.7, "Default price"
 Assert Abs(q.TotalWeight - q.TotalArea * q.Thickness * q.Density) < 0.000001, "Profile weight formula"
 Assert Abs(q.TotalMaterialCost - q.TotalWeight * 0.7) < 0.000001, "Material cost formula"
-Set other = UIQuoteWithPrice(4, "N/A", "Double return", "Borcon Weathering Steel", "1/4 inch", 300, 450, 48, 1.4)
+Set other = UIQuoteWithPrice(4, "N/A", "Double return", "Borcon Weathering Steel", "1/4 inch", 300, 450, 48, 1.4, 0.25, 0.25)
 Assert other.Density = q.Density And other.TotalWeight = q.TotalWeight, "Same density for both materials"
 Assert Abs(other.TotalMaterialCost - q.TotalMaterialCost * 2) < 0.000001, "User-entered price drives cost"
 Set other = UICalculateQuote(4, "N/A", "Single return 1 inch", "Mild Steel", "3/16 inch", 400, 400, 23.75)
@@ -159,12 +440,15 @@ Assert InStr(report, "NOT CALCULATED") > 0, "No invented cost"
 originalArea = q.TotalArea
 originalWeight = q.TotalWeight
 originalCost = q.TotalMaterialCost
-summary = UIQuoteSummary(q)
+summary = UIQuoteSummaryCards(q)
 rows = UIQuoteComponentRows(q)
-Assert InStr(summary, "PROFILE MATERIAL ESTIMATE: $") = 1, "Summary leads with estimate"
-Assert InStr(summary, "1/4 in  |  $0.70/lb") > 0, "Readable thickness and price"
-Assert InStr(summary, "300.000 x 450.000 x 48.000 in") > 0, "Rounded summary dimensions"
-Assert InStr(summary, "CENTER_WALL_PATTERN_COUNT") = 0, "Technical equations not in summary"
+Assert UBound(summary, 1) = 6 And UBound(summary, 2) = 1, "Headline, design and five summary tiles"
+Assert summary(0, 0) = "PROFILE MATERIAL ESTIMATE" And summary(0, 1) = "$" & FormatNumber(q.TotalMaterialCost, 2), "Summary leads with estimate"
+Assert InStr(summary(1, 1), "1/4 in  |  $0.70/lb") > 0, "Readable thickness and price"
+Assert InStr(summary(1, 1), "300.000 x 450.000 x 48.000 in") > 0, "Rounded summary dimensions"
+Assert InStr(summary(1, 1), "CENTER_WALL_PATTERN_COUNT") = 0, "Technical equations not in summary"
+Assert summary(2, 1) = FormatNumber(q.TotalWeight, 2) & " lb" And summary(4, 1) = CStr(q.SheetCount), "Weight and sheet tiles"
+Assert summary(5, 1) = FormatNumber(q.UtilizationPercent, 2) & "%" And summary(6, 0) = "Unused / potential scrap", "Utilization and scrap tiles"
 Assert UBound(rows, 1) = 5 And UBound(rows, 2) = 5, "Six wall/base/end rows"
 gussetRows = UIQuoteGussetRows(q)
 totalRows = UIQuoteTotalRows(q)
@@ -182,6 +466,17 @@ Assert rows(2, 2) = "112.375" And rows(2, 3) = "49.191", "Three decimal dimensio
 Assert rows(2, 4) = FormatNumber(q.Components(2).TotalWeight, 2), "Two decimal weight"
 Assert rows(2, 5) = "$" & FormatNumber(q.Components(2).TotalMaterialCost, 2), "Two decimal cost"
 Assert q.TotalArea = originalArea And q.TotalWeight = originalWeight And q.TotalMaterialCost = originalCost, "Presentation does not round stored results"
+Set other = UICalculateQuote(1, "N/A", "No return", "Mild Steel", "1/4 inch", 100, 60, 48)
+rows = UIQuoteComponentRows(other)
+total = 0
+For i = 0 To 5
+    If other.Components(i).Quantity > 0 Then total = total + 1
+Next
+Assert total < 6, "Reference design has zero-quantity components"
+Assert UBound(rows, 1) = total - 1, "Zero-quantity components hidden from table"
+For i = 0 To UBound(rows, 1)
+    Assert rows(i, 1) <> "0", "No zero-quantity rows shown"
+Next
 For walls = 1 To 4
     orient = "N/A"
     If walls = 2 Then orient = "Left"
@@ -221,6 +516,7 @@ For walls = 1 To 4
                 Assert part.Quantity = q.SideWallRuns, "Left ends once per run, not per segment"
                 Set part = q.Components(5)
                 Assert part.Quantity = q.SideWallRuns, "Right ends once per run"
+                If q.HasValidTotals And q.NestAvailable Then CheckNest q
             Next
             For Each thickness In Array("1/4 inch", "3/16 inch")
                 For Each h In Array(48, 23.75)
@@ -253,11 +549,12 @@ Set q = UICalculateQuote(1, "N/A", "No return", "Mild Steel", "3/16 inch", 120.5
 Assert q.CenterSizingSegments = 2 And q.CenterPatternCount = 1, "Preserve source boundary discrepancy"
 report = UIQuoteReport(q)
 Assert InStr(report, "REVIEW REQUIRED") > 0 And InStr(report, "Derived center planter total:") = 0, "Withhold unreliable totals"
-summary = UIQuoteSummary(q)
+Assert Not q.NestAvailable And q.SheetCount = 0, "No nesting on count mismatch"
+summary = UIQuoteSummaryCards(q)
 rows = UIQuoteComponentRows(q)
-Assert InStr(summary, "REVIEW REQUIRED") = 1, "Warnings visible in summary"
-Assert InStr(summary, "PROFILE MATERIAL ESTIMATE:") = 0, "No misleading estimate on mismatch"
-Assert InStr(summary, q.Warnings) > 0, "Summary preserves mismatch explanation"
+Assert InStr(summary(0, 0), "REVIEW REQUIRED") = 1 And summary(0, 1) = "Review required", "Warnings visible in summary"
+Assert InStr(summary(0, 1), "$") = 0 And summary(2, 1) = "Withheld" And summary(4, 1) = "N/A", "No misleading estimate on mismatch"
+Assert InStr(summary(1, 1), q.Warnings) > 0, "Summary preserves mismatch explanation"
 Assert rows(0, 1) = "Review" And rows(0, 4) = "Withheld" And rows(0, 5) = "Withheld", "Table withholds untrusted totals"
 gussetRows = UIQuoteGussetRows(q)
 totalRows = UIQuoteTotalRows(q)
@@ -277,12 +574,198 @@ On Error GoTo 0
 Assert code <> 0, "Invalid selections rejected"
 For Each price In Array(0, -0.7)
     On Error Resume Next
-    Set q = UIQuoteWithPrice(1, "N/A", "No return", "Mild Steel", "1/4 inch", 100, 100, 10, price)
+    Set q = UIQuoteWithPrice(1, "N/A", "No return", "Mild Steel", "1/4 inch", 100, 100, 10, price, 0.25, 0.25)
     code = Err.Number
     Err.Clear
     On Error GoTo 0
     Assert code <> 0, "Nonpositive price rejected"
 Next
+Set q = UICalculateQuote(4, "N/A", "Double return", "Mild Steel", "1/4 inch", 300, 200, 20)
+CheckNest q
+Assert q.SheetCount = 7 And q.AreaMinimumSheets = 6, "Reference heuristic sheets versus area lower bound"
+UINestQuote q, 0.25, 0.25
+Assert Abs(q.UnusedPercent - 27.3066293650793) < 0.000001, "Reference scrap estimate"
+pdfText = UIPDFOutline(Array(Array(0, 0), Array(10, 0), Array(3, 20), Array(0, 20)), 5, 7, 90, 20, True)
+Assert InStr(pdfText, "186 232 m") > 0, "Rotated gusset origin"
+Assert InStr(pdfText, "66 250 l") > 0, "Rotated gusset top vertex"
+pdfText = UIPDFOutline(Array(Array(0, 0), Array(10, 0), Array(3, 20), Array(0, 20)), 5, 7, 180, 20, True)
+Assert InStr(pdfText, "126 352 m") > 0, "180-degree gusset origin"
+pdfText = UIPDFOutline(Array(Array(0, 0), Array(10, 0), Array(3, 20), Array(0, 20)), 5, 7, 270, 20, True)
+Assert InStr(pdfText, "66 292 m") > 0, "270-degree gusset origin"
+Assert InStr(UIPDFText(0, 0, 10, "A (B) \ C"), "A \(B\) \\ C") > 0, "PDF text escapes parentheses and slash"
+Assert UIPDFPartLabel(0) = "CW" And UIPDFPartLabel(1) = "CBP" And UIPDFPartLabel(2) = "SW", "Planter part labels"
+Assert UIPDFPartLabel(3) = "SBP" And UIPDFPartLabel(4) = "LW" And UIPDFPartLabel(5) = "RW", "Base plate and end wall labels"
+Assert UIPDFPartLabel(6) = "MG" And UIPDFPartLabel(7) = "CG", "Gusset labels"
+Assert q.Components(4).Name = "Left Side Wall" And q.Components(5).Name = "Right Side Wall", "Readable end wall names"
+Set other = UICalculateQuote(1, "N/A", "No return", "Mild Steel", "3/16 inch", 100, 100, 10)
+pdfText = UIPDFParts(other)
+Assert InStr(pdfText, "(Center Planter Wall)") > 0 And InStr(pdfText, "(Mounting Gusset)") > 0, "Used parts listed"
+Assert InStr(pdfText, "Side Planter") = 0 And InStr(pdfText, "Side Wall)") = 0, "Unused parts hidden from parts list"
+pdfText = UIQuoteLayoutPDF(q)
+Set pdfFSO = CreateObject("Scripting.FileSystemObject")
+UISaveQuoteLayoutPDF q, WScript.Arguments(0)
+Set pdfFile = pdfFSO.OpenTextFile(WScript.Arguments(0), 1)
+Assert pdfFile.ReadAll = pdfText, "File writer preserves PDF byte offsets"
+pdfFile.Close
+On Error Resume Next
+UISaveQuoteLayoutPDF q, WScript.Arguments(0)
+code = Err.Number
+Err.Clear
+On Error GoTo 0
+Assert code <> 0, "Existing PDF never overwritten"
+UIPreviewQuoteLayoutPDF q
+Assert pdfFSO.FileExists(previewPath), "Temporary PDF exists before launching viewer"
+Assert pdfFSO.GetParentFolderName(previewPath) = CStr(pdfFSO.GetSpecialFolder(2)), "Preview uses system temporary folder"
+pdfFSO.DeleteFile previewPath
+previewPath = ""
+Set other = UICalculateQuote(1, "N/A", "No return", "Mild Steel", "1/4 inch", 10, 10, 6)
+WScript.Echo "Example: " & q.SheetCount & " sheets; unused=" & q.UnusedPercent
+p = q.SheetPlacements
+UINestQuote q, 0.25, 0.25
+Assert UBound(q.SheetPlacements) = UBound(p), "Deterministic repeat layout"
+For i = 0 To UBound(p)
+    For j = 0 To 8
+        Assert p(i,j) = q.SheetPlacements(i,j), "Deterministic placement fields"
+    Next
+Next
+Set q = UICalculateQuote(1, "N/A", "No return", "Mild Steel", "1/4 inch", 120, 100, 20)
+Assert Not q.NestAvailable And InStr(q.NestStatus, "does not fit") > 0, "120-inch part rejects positive edge margin"
+On Error Resume Next
+pdfText = UIQuoteLayoutPDF(q)
+code = Err.Number
+Err.Clear
+On Error GoTo 0
+Assert code <> 0, "Unavailable layout cannot preview PDF"
+On Error Resume Next
+UIPreviewQuoteLayoutPDF q
+code = Err.Number
+Err.Clear
+On Error GoTo 0
+Assert code <> 0 And previewPath = "", "Unavailable preview never launches viewer"
+UINestQuote q, 0.25, 0
+CheckNest q
+Set q = UICalculateQuote(1, "N/A", "No return", "Mild Steel", "1/4 inch", 100, 100, 20)
+UINestQuote q, 0, 0
+CheckNest q
+customItems(0, 0) = "Rotation test"
+customItems(0, 1) = 40
+customItems(0, 2) = 70
+customItems(0, 3) = 2800
+customItems(0, 4) = 1
+p = UINestPack(customItems, 119.5, 59.5, 0.25, 0.25, 0, customSheets)
+Assert customSheets = 1 And p(0, 6) = 90, "Part requiring 90 degree rotation fits"
+Assert p(0, 4) = 70 And p(0, 5) = 40, "Rotated envelope dimensions"
+p = UINestMaxRects(customItems, 119.5, 59.5, 0.25, 0.25, 0, customSheets)
+Assert customSheets = 1 And p(0, 6) = 90, "MaxRects required rotation fits"
+CheckMaxRects customItems, p, 119.5, 59.5, 0.25, 0.25, customSheets
+trialWidths = Array(50, 40, 50, 30, 25, 25, 40, 40)
+trialHeights = Array(15, 20, 20, 10, 15, 25, 25, 35)
+For i = 0 To 7
+    heuristicItems(i, 0) = "Synthetic " & i
+    heuristicItems(i, 1) = trialWidths(i)
+    heuristicItems(i, 2) = trialHeights(i)
+    heuristicItems(i, 3) = trialWidths(i) * trialHeights(i)
+    heuristicItems(i, 4) = 1
+Next
+legacyBest = 100
+For sortOrder = 0 To 1
+    ReDim trialItems(7, 4)
+    For i = 0 To 7
+        For j = 0 To 4
+            trialItems(i, j) = heuristicItems(i, j)
+        Next
+    Next
+    UINestSort trialItems, sortOrder
+    For splitMode = 0 To 1
+        p = UINestPack(trialItems, 60, 40, 0, 0, splitMode, trialSheets)
+        If trialSheets < legacyBest Then legacyBest = trialSheets
+    Next
+Next
+extraBest = legacyBest
+For sortOrder = 0 To 3
+    ReDim trialItems(7, 4)
+    For i = 0 To 7
+        For j = 0 To 4
+            trialItems(i, j) = heuristicItems(i, j)
+        Next
+    Next
+    UINestSort trialItems, sortOrder
+    For splitMode = 0 To 5
+        If sortOrder >= 2 Or splitMode >= 2 Then
+            p = UINestPack(trialItems, 60, 40, 0, 0, splitMode, trialSheets)
+            If trialSheets < extraBest Then extraBest = trialSheets
+        End If
+    Next
+Next
+Assert legacyBest = 4 And extraBest = 3, "Additional heuristic trials improve synthetic fit from four sheets to three"
+trialWidths = Array(15, 45, 35, 15, 10, 40, 20, 20, 50, 20)
+trialHeights = Array(35, 20, 15, 25, 25, 15, 20, 25, 15, 15)
+For i = 0 To 9
+    maxItems(i, 0) = "MaxRects regression " & i
+    maxItems(i, 1) = trialWidths(i)
+    maxItems(i, 2) = trialHeights(i)
+    maxItems(i, 3) = trialWidths(i) * trialHeights(i)
+    maxItems(i, 4) = 1
+Next
+extraBest = 100
+maxBest = 100
+For sortOrder = 0 To 3
+    trialItems = maxItems
+    UINestSort trialItems, sortOrder
+    For splitMode = 0 To 5
+        p = UINestPack(trialItems, 60, 40, 0.25, 0.25, splitMode, trialSheets)
+        If trialSheets < extraBest Then extraBest = trialSheets
+    Next
+    For splitMode = 0 To 1
+        p = UINestMaxRects(trialItems, 60, 40, 0.25, 0.25, splitMode, trialSheets)
+        CheckMaxRects trialItems, p, 60, 40, 0.25, 0.25, trialSheets
+        If trialSheets < maxBest Then maxBest = trialSheets
+    Next
+Next
+Assert extraBest = 4 And maxBest = 3, "MaxRects improves packing versus all24 split layouts from four sheets to three"
+For i = 0 To 95
+    stressItems(i, 0) = "Stress " & i
+    stressItems(i, 1) = 8 + (i Mod 7)
+    stressItems(i, 2) = 6 + (i Mod 11)
+    stressItems(i, 3) = stressItems(i, 1) * stressItems(i, 2)
+    stressItems(i, 4) = 1
+Next
+For Each gap In Array(0, 0.25, 1)
+    For splitMode = 0 To 1
+        p = UINestMaxRects(stressItems, 119.5, 59.5, gap, 0.25, splitMode, trialSheets)
+        CheckMaxRects stressItems, p, 119.5, 59.5, gap, 0.25, trialSheets
+    Next
+Next
+Set other = UICalculateQuote(1, "N/A", "No return", "Mild Steel", "1/4 inch", 100, 100, 20)
+For i = 0 To UBound(other.Components)
+    other.Components(i).Quantity = 0
+Next
+other.Components(6).Quantity = 3
+other.TotalArea = other.Components(6).Area * 3
+UINestQuote other, 0.25, 25
+Assert other.NestAvailable And UBound(other.SheetPlacements) = 2, "Oversized pairs fall back to three fitting single gussets"
+For i = 0 To UBound(other.SheetPlacements)
+    Assert other.SheetPlacements(i, 8) = 1, "Fallback preserves physical single counts"
+    Assert other.SheetPlacements(i, 2) + other.SheetPlacements(i, 4) <= 95.000001, "Fallback length boundary"
+    Assert other.SheetPlacements(i, 3) + other.SheetPlacements(i, 5) <= 35.000001, "Fallback width boundary"
+Next
+For Each margin In Array(-1, 30)
+    On Error Resume Next
+    UINestQuote q, 0.25, margin
+    code = Err.Number
+    Err.Clear
+    On Error GoTo 0
+    Assert code <> 0, "Invalid margin explicitly rejected"
+Next
+On Error Resume Next
+UINestQuote q, -0.01, 0.25
+code = Err.Number
+Err.Clear
+On Error GoTo 0
+Assert code <> 0, "Negative gap rejected"
+q.Components(0).Quantity = 2001
+UINestQuote q, 0.25, 0.25
+Assert Not q.NestAvailable And q.SheetCount = 0 And InStr(q.NestStatus, "2000") > 0, "Bounded layout unavailable, not false success"
 For Each price In Array("0.70", ".7", "1.25", " 0.70 ")
     Assert UIQuoteParsePrice(price) = CDbl(Trim(price)), "Valid decimal pricing input"
 Next
@@ -298,8 +781,469 @@ WScript.Echo "PASS: screenshot, 288 scenarios, thresholds, warnings, totals and 
 '''
         with tempfile.TemporaryDirectory(prefix="planter-quote-") as folder:
             runner = Path(folder) / "quote.vbs"
+            layout = Path(folder) / "layout.pdf"
             runner.write_text(script, encoding="ascii")
-            result = subprocess.run(["cscript", "//Nologo", str(runner)], capture_output=True,
-                                    text=True, timeout=30)
+            result = subprocess.run(["cscript", "//Nologo", str(runner), str(layout)], capture_output=True,
+                                    text=True, timeout=120)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("PASS:", result.stdout, result.stdout + result.stderr)
+            from pypdf import PdfReader
+            reader = PdfReader(layout, strict=True)
+            self.assertEqual(len(reader.pages), 10)
+            summary_text = reader.pages[0].extract_text()
+            self.assertIn("Optimization Summary", summary_text)
+            self.assertIn("SHEETS REQUIRED", summary_text)
+            self.assertIn("78 physical parts", summary_text)
+            self.assertIn("Used for profiles: 72.69%", summary_text)
+            self.assertIn("Unused / potential scrap: 27.31%", summary_text)
+            self.assertIn("350.00 sq ft", summary_text)
+            self.assertIn("7 sheets of 120 x 60 in", summary_text)
+            self.assertIn("Profile area: 254.43 sq ft", summary_text)
+            self.assertIn("Unused area: 95.57 sq ft", summary_text)
+            self.assertIn("Area-only minimum: 6 sheets", summary_text)
+            self.assertIn("(27 pairs)", summary_text)
+            self.assertIn("Guillotine - paired gussets", summary_text)
+            self.assertIn("32-trial baseline", summary_text)
+            self.assertIn("Up to 48 different layouts are tried", summary_text)
+            self.assertIn("(4 parts turned)", summary_text)
+            self.assertIn("4. Remove a sheet if possible", summary_text)
+            for jargon in ("MaxRects packing", "Guillotine and", "least-used sheet"):
+                self.assertNotIn(jargon, summary_text)
+            self.assertNotIn("Compare 48", summary_text)
+            self.assertIn("Sheet Usage - Unused / Potential Scrap", reader.pages[1].extract_text())
+            parts_text = reader.pages[2].extract_text()
+            self.assertIn("Parts List - Total Quantities", parts_text)
+            for label, name, quantity in (("CW", "Center Planter Wall", 6), ("CBP", "Center Planter Base Plate", 6),
+                                          ("SW", "Side Planter Wall", 4), ("SBP", "Side Planter Base Plate", 4),
+                                          ("LW", "Left Side Wall", 2), ("RW", "Right Side Wall", 2),
+                                          ("MG", "Mounting Gusset", 20), ("CG", "Center Gusset", 34)):
+                self.assertRegex(parts_text, rf"{label}\s*{name}\s*(Rectangle|Trapezoid)[^\n]*?\s{quantity}\s")
+            self.assertRegex(parts_text, r"TOTAL\s*78\s*254\.43")
+            self.assertIn("not a guaranteed global minimum", summary_text)
+            self.assertIn("not all discarded scrap", summary_text)
+            self.assertIn("0.25 in / 0.25 in", summary_text)
+            summary_stream = reader.pages[0].get_contents().get_data().decode("ascii")
+            self.assertIn("re f Q", summary_stream)
+            self.assertIn("/F2 22 Tf", summary_stream)
+            area = 0
+            parts = 0
+            legend_counts = [0] * 8
+            for sheet, page in enumerate(reader.pages[3:], 1):
+                self.assertEqual(list(page.mediabox), [0, 0, 792, 612])
+                text = page.extract_text()
+                self.assertIn(f"Sheet {sheet} of 7", text)
+                self.assertIn("NOT A PRODUCTION CUTTING PLAN", text)
+                self.assertIn("Stock: 120 x 60 in", text)
+                polygon = []
+                polygons = []
+                page_area = 0
+                page_parts = 0
+                for line in page.get_contents().get_data().decode("ascii").splitlines():
+                    tokens = line.split()
+                    if len(tokens) == 3 and tokens[-1] in ("m", "l"):
+                        polygon.append(((float(tokens[0]) - 36) / 6,
+                                        (float(tokens[1]) - 190) / 6))
+                    elif line == "h S":
+                        polygon = []
+                    elif line == "h B":
+                        self.assertEqual(len(polygon), 4)
+                        signed = 0
+                        for index, (x, y) in enumerate(polygon):
+                            xx, yy = polygon[(index + 1) % 4]
+                            self.assertGreaterEqual(x, 0.25 - 1e-8)
+                            self.assertLessEqual(x, 119.75 + 1e-8)
+                            self.assertGreaterEqual(y, 0.25 - 1e-8)
+                            self.assertLessEqual(y, 59.75 + 1e-8)
+                            signed += x * yy - xx * y
+                        page_area += abs(signed) / 2
+                        page_parts += 1
+                        polygons.append(polygon)
+                        polygon = []
+                for i, first in enumerate(polygons):
+                    for second in polygons[i + 1:]:
+                        self.assertFalse(polygons_overlap(first, second),
+                                         f"Overlapping component profiles on sheet {sheet}")
+                        self.assertGreaterEqual(polygon_clearance(first, second), 0.25 - 1e-8,
+                                                f"Insufficient part clearance on sheet {sheet}")
+                area += page_area
+                parts += page_parts
+                self.assertIn(f"This sheet: {page_parts} parts", text)
+                self.assertIn(f"Utilization: {page_area / 7200 * 100:.2f}%", text)
+                self.assertIn(f"Unused: {100 - page_area / 7200 * 100:.2f}%", text)
+                names = ("Center Planter Wall", "Center Planter Base Plate", "Side Planter Wall",
+                         "Side Planter Base Plate", "Left Side Wall", "Right Side Wall",
+                         "Mounting Gusset", "Center Gusset")
+                labels = ("CW", "CBP", "SW", "SBP", "LW", "RW", "MG", "CG")
+                self.assertIn("PART LEGEND", text)
+                self.assertNotIn("C1", text)
+                quantities = []
+                for code, (name, label) in enumerate(zip(names, labels), 1):
+                    match = re.search(rf"\b{label}\s*{re.escape(name)}: (\d+)", text)
+                    if match is None:
+                        self.assertNotIn(name + ":", text)
+                        continue
+                    self.assertGreater(int(match[1]), 0, "Legend lists only parts on this sheet")
+                    quantities.append((str(code), match[1]))
+                self.assertEqual(sum(int(q) for _, q in quantities), page_parts)
+                for code, quantity in quantities:
+                    legend_counts[int(code) - 1] += int(quantity)
+            self.assertEqual(parts, 78)
+            self.assertEqual(legend_counts, [6, 6, 4, 4, 2, 2, 20, 34])
+            self.assertAlmostEqual(area, 36637.4588, places=6)
+
+    @unittest.skipUnless(shutil.which("cscript"), "Windows Script Host required")
+    def test_demonstrable_improvements_and_sheet_elimination(self):
+        """Verify synthetic improvements for single gussets, mixed gussets, and sheet elimination."""
+        def procedure(source, name):
+            match = re.search(rf"^(?:Public|Private) (Function|Sub) {name}\b.*?^End \1$",
+                              source, re.MULTILINE | re.DOTALL)
+            body = re.sub(r" As (?:Long|String|Double|Boolean|Variant|Object|UIQuoteResult|UIQuoteComponent)\b", "", match[0])
+            body = body.replace("Private Function", "Function").replace("Public Function", "Function")
+            body = body.replace("Private Sub", "Sub").replace("Public Sub", "Sub")
+            body = body.replace("parts(0 To 7)", "parts(7)")
+            body = body.replace("rows(0 To count - 1, 0 To weightColumn + 1)", "rows(count - 1, weightColumn + 1)")
+            body = body.replace("rows(0 To 0, 0 To 2)", "rows(0, 2)")
+            body = re.sub(r"(\w+)\(0 To ([^\n,]+), 0 To ([^\n)]+)\)", r"\1(\2, \3)", body)
+            body = re.sub(r"(\w+)\(0 To ([^\n)]+)\)", r"\1(\2)", body)
+            body = body.replace("usedSheets(1 To sheets)", "usedSheets(sheets)").replace("0#", "0")
+            body = re.sub(r"^(\s*Next) \w+$", r"\1", body, flags=re.MULTILINE)
+            body = re.sub(r"\bTrim\$", "Trim", body).replace("ByRef gussets()", "ByRef gussets")
+            body = body.replace("Right$(", "Right(").replace("Format$(", "FormatNumberPDF(")
+            body = body.replace("Left$(", "Left(").replace("ByRef offsets()", "ByRef offsets").replace("Mid$(", "Mid(").replace("Trim$(", "Trim(")
+            body = body.replace("Str$(value)", "CStr(value)").replace("Val(cleaned)", "CDbl(cleaned)")
+            return body
+
+        fields = re.sub(r" As (?:Long|String|Double|Boolean|Variant)\b", "",
+                        RESULT.split("Option Explicit", 1)[1])
+        base_script = "Option Explicit\nSetLocale 1033\n"
+        base_script += "Sub Assert(cond, msg)\n    If Not cond Then\n        WScript.Echo \"FAIL: \" & msg\n        WScript.Quit 1\n    End If\nEnd Sub\n"
+        base_script += "Function IIf(cond, a, b)\n    If cond Then IIf = a Else IIf = b\nEnd Function\n"
+        base_script += "Function FormatNumberPDF(value, pattern)\n    FormatNumberPDF = FormatNumber(value, 2, -1, 0, 0)\nEnd Function\n"
+        base_script += "\nClass UIQuoteResult\n" + fields + "\nEnd Class\n"
+        comp_fields = re.sub(r" As (?:String|Double)\b", "", COMPONENT.split("Option Explicit", 1)[1])
+        base_script += "\nClass UIQuoteComponent\n" + comp_fields + "\nEnd Class\n"
+        for name in ("UINestQuote", "UINestSort", "UINestMax", "UINestPack", "UINestMaxRects",
+                     "UINestFreeAdd", "UINestFreePrune", "UINestReport", "UINestBuildItems",
+                     "UINestFreeSubtract", "UINestEliminateSheet"):
+            base_script += procedure(NESTING, name) + "\n"
+
+        test_body = base_script + r"""
+Dim q, i, comps(7), p(1, 8), outP, ok, j, orig(1, 8), p3(2, 8), orig3(2, 8)
+
+' 1. Single-gusset demonstrable improvement: 2 baseline sheets reduced to 1 sheet
+Set q = New UIQuoteResult
+q.Material = "Mild Steel"
+q.Thickness = 0.25
+q.HasValidTotals = True
+q.GussetBottomWidth = 20
+q.GussetTopWidth = 5
+q.GussetHeight = 25
+For i = 0 To 7
+    Set comps(i) = New UIQuoteComponent
+    comps(i).Material = q.Material
+    comps(i).Thickness = q.Thickness
+    comps(i).Quantity = 0
+Next
+comps(0).Name = "Panel"
+comps(0).Length = 95
+comps(0).Width = 25
+comps(0).Area = 95 * 25
+comps(0).Quantity = 2
+comps(6).Name = "Mounting Gusset"
+comps(6).Length = 25
+comps(6).Width = 20
+comps(6).TopWidth = 5
+comps(6).Area = (20 + 5) * 25 / 2
+comps(6).Quantity = 2
+q.Components = comps
+q.TotalArea = 2 * (95 * 25) + 2 * comps(6).Area
+UINestQuote q, 0.25, 0.25
+Assert q.SheetCount = 1, "Single gusset policy reduces sheet count to 1"
+Assert q.NestBaselineSheets = 2, "Paired baseline required 2 sheets"
+Assert q.NestMethod = "MaxRects - single gussets", "Winning method is MaxRects single gussets"
+Assert q.NestTrialCount = 48, "48 candidate layouts evaluated"
+Assert UBound(q.SheetPlacements) = 3, "All 4 physical components placed"
+For i = 0 To UBound(q.SheetPlacements)
+    Assert q.SheetPlacements(i, 0) = 1, "All parts on sheet 1"
+    Assert q.SheetPlacements(i, 8) = 1, "Single gussets placed as individual parts"
+Next
+
+' 2. Mixed-gusset demonstrable improvement: 2 baseline sheets reduced to 1 sheet
+Set q = New UIQuoteResult
+q.Material = "Mild Steel"
+q.Thickness = 0.25
+q.HasValidTotals = True
+q.GussetBottomWidth = 16
+q.GussetTopWidth = 5
+q.GussetHeight = 30
+For i = 0 To 7
+    Set comps(i) = New UIQuoteComponent
+    comps(i).Material = q.Material
+    comps(i).Thickness = q.Thickness
+    comps(i).Quantity = 0
+Next
+comps(0).Name = "Panel"
+comps(0).Length = 90
+comps(0).Width = 20
+comps(0).Area = 90 * 20
+comps(0).Quantity = 2
+comps(6).Name = "Mounting Gusset"
+comps(6).Length = 30
+comps(6).Width = 16
+comps(6).TopWidth = 5
+comps(6).Area = (16 + 5) * 30 / 2
+comps(6).Quantity = 5
+q.Components = comps
+q.TotalArea = 2 * (90 * 20) + 5 * comps(6).Area
+UINestQuote q, 0.25, 0.25
+Assert q.SheetCount = 1, "Mixed gusset policy reduces sheet count to 1"
+Assert q.NestBaselineSheets = 2, "Paired baseline required 2 sheets"
+Assert q.NestMethod = "MaxRects - mixed gussets", "Winning method is MaxRects mixed gussets"
+Assert q.NestTrialCount = 48, "48 candidate layouts evaluated"
+
+' 3. Successful Last-Sheet Elimination Pass
+p(0, 0) = 1
+p(0, 1) = "Part 1"
+p(0, 2) = 0.25
+p(0, 3) = 0.25
+p(0, 4) = 80
+p(0, 5) = 50
+p(0, 6) = 0
+p(0, 7) = 4000
+p(0, 8) = 1
+
+p(1, 0) = 2
+p(1, 1) = "Part 2"
+p(1, 2) = 0.25
+p(1, 3) = 0.25
+p(1, 4) = 30
+p(1, 5) = 40
+p(1, 6) = 0
+p(1, 7) = 1200
+p(1, 8) = 1
+
+ok = UINestEliminateSheet(p, 2, 119.5, 59.5, 0.25, 0.25, outP)
+Assert ok, "Elimination succeeded"
+Assert outP(0, 0) = 1 And outP(1, 0) = 1, "All parts relocated onto Sheet 1"
+Assert outP(1, 2) >= 80.25, "Relocated part respects gap clearance on Sheet 1"
+
+' 4. Failed Elimination Pass: Source Unmutated Guarantee
+p(0, 4) = 110
+p(0, 5) = 55
+p(1, 4) = 50
+p(1, 5) = 50
+For i = 0 To 1
+    For j = 0 To 8
+        orig(i, j) = p(i, j)
+    Next
+Next
+ok = UINestEliminateSheet(p, 2, 119.5, 59.5, 0.25, 0.25, outP)
+Assert Not ok, "Impossible elimination rejected"
+For i = 0 To 1
+    For j = 0 To 8
+        Assert p(i, j) = orig(i, j), "Source placements strictly unmutated on failed elimination"
+    Next
+Next
+
+' 5. Non-last least-used sheet: middle sheet eliminated, later sheet renumbered
+For i = 0 To 2
+    p3(i, 2) = 0.25
+    p3(i, 3) = 0.25
+    p3(i, 6) = 0
+    p3(i, 8) = 1
+    p3(i, 0) = i + 1
+    p3(i, 1) = "Part " & (i + 1)
+Next
+p3(0, 4) = 80
+p3(0, 5) = 50
+p3(0, 7) = 4000
+p3(1, 4) = 30
+p3(1, 5) = 40
+p3(1, 7) = 1200
+p3(2, 4) = 100
+p3(2, 5) = 50
+p3(2, 7) = 5000
+For i = 0 To 2
+    For j = 0 To 8
+        orig3(i, j) = p3(i, j)
+    Next
+Next
+ok = UINestEliminateSheet(p3, 3, 119.5, 59.5, 0.25, 0.25, outP)
+Assert ok, "Middle least-used sheet eliminated"
+Assert outP(0, 0) = 1, "Sheet 1 part stays on sheet 1"
+Assert outP(1, 0) = 1, "Middle-sheet part relocated beside sheet 1 part"
+Assert outP(1, 2) >= 80.25 - 0.000001, "Relocated part keeps gap from sheet 1 part"
+Assert outP(2, 0) = 2, "Former sheet 3 renumbered to sheet 2"
+For j = 1 To 8
+    Assert outP(2, j) = p3(2, j), "Renumbered sheet placement otherwise unchanged " & j
+Next
+For i = 0 To 2
+    For j = 0 To 8
+        Assert p3(i, j) = orig3(i, j), "Source unmutated on successful non-last elimination"
+    Next
+Next
+
+' 6. Non-last failure: middle part too large for remaining space leaves source untouched
+p3(1, 4) = 60
+p3(1, 5) = 45
+p3(1, 7) = 2700
+For i = 0 To 2
+    For j = 0 To 8
+        orig3(i, j) = p3(i, j)
+    Next
+Next
+ok = UINestEliminateSheet(p3, 3, 119.5, 59.5, 0.25, 0.25, outP)
+Assert Not ok, "Unplaceable middle sheet rejected"
+For i = 0 To 2
+    For j = 0 To 8
+        Assert p3(i, j) = orig3(i, j), "Source unmutated on failed non-last elimination"
+    Next
+Next
+WScript.Echo "PASS: demonstrable improvements and sheet elimination"
+"""
+        with tempfile.TemporaryDirectory(prefix="test-vbs-") as folder:
+            runner = Path(folder) / "run.vbs"
+            runner.write_text(test_body, encoding="ascii")
+            res = subprocess.run(["cscript", "//Nologo", str(runner)], capture_output=True, text=True, timeout=30)
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            self.assertIn("PASS: demonstrable improvements and sheet elimination", res.stdout)
+
+    @unittest.skipUnless(shutil.which("cscript"), "Windows Script Host required")
+    def test_five_realistic_reference_examples_and_determinism(self):
+        """Evaluate 5 distinct realistic configurations verifying non-regression and determinism."""
+        def procedure(source, name):
+            match = re.search(rf"^(?:Public|Private) (Function|Sub) {name}\b.*?^End \1$",
+                              source, re.MULTILINE | re.DOTALL)
+            body = re.sub(r" As (?:Long|String|Double|Boolean|Variant|Object|UIQuoteResult|UIQuoteComponent)\b", "", match[0])
+            body = body.replace("Private Function", "Function").replace("Public Function", "Function")
+            body = body.replace("Private Sub", "Sub").replace("Public Sub", "Sub")
+            body = body.replace("parts(0 To 7)", "parts(7)")
+            body = body.replace("rows(0 To count - 1, 0 To weightColumn + 1)", "rows(count - 1, weightColumn + 1)")
+            body = body.replace("rows(0 To 0, 0 To 2)", "rows(0, 2)")
+            body = re.sub(r"(\w+)\(0 To ([^\n,]+), 0 To ([^\n)]+)\)", r"\1(\2, \3)", body)
+            body = re.sub(r"(\w+)\(0 To ([^\n)]+)\)", r"\1(\2)", body)
+            body = body.replace("usedSheets(1 To sheets)", "usedSheets(sheets)").replace("0#", "0")
+            if name == "UICalculateQuote":
+                body = body.replace("Optional ByVal pricePerPound = 0.7", "ByVal pricePerPound")
+                body = body.replace("Optional ByVal partGap = 0.25", "ByVal partGap")
+                body = body.replace("Optional ByVal edgeMargin = 0.25", "ByVal edgeMargin")
+                body = body.replace("UICalculateQuote", "UIQuoteWithPrice")
+            body = re.sub(r"^(\s*Next) \w+$", r"\1", body, flags=re.MULTILINE)
+            body = re.sub(r"\bTrim\$", "Trim", body).replace("ByRef gussets()", "ByRef gussets")
+            body = body.replace("Right$(", "Right(").replace("Format$(", "FormatNumberPDF(")
+            body = body.replace("Left$(", "Left(").replace("ByRef offsets()", "ByRef offsets").replace("Mid$(", "Mid(").replace("Trim$(", "Trim(")
+            body = body.replace("Str$(value)", "CStr(value)").replace("Val(cleaned)", "CDbl(cleaned)")
+            if name == "UIQuoteParsePrice":
+                body = body.replace("On Error GoTo InvalidPrice", "On Error Resume Next\n    Err.Clear")
+                body = body.replace("    Exit Function\nInvalidPrice:", "    If Err.Number = 0 Then Exit Function\n    On Error GoTo 0")
+            if name == "UIQuoteGussets":
+                body = body.replace("    Select Case length\n", "")
+                body = body.replace("Case Is <= 24:", "If length <= 24 Then\n")
+                for limit in (48, 72, 96):
+                    body = body.replace(f"Case Is <= {limit}:", f"ElseIf length <= {limit} Then\n")
+                body = body.replace("Case Else:", "Else\n").replace("End Select", "End If")
+            return body
+
+        fields = re.sub(r" As (?:Long|String|Double|Boolean|Variant)\b", "",
+                        RESULT.split("Option Explicit", 1)[1])
+        base = "Option Explicit\nSetLocale 1033\n"
+        base += "Sub Assert(cond, msg)\n    If Not cond Then\n        WScript.Echo \"FAIL: \" & msg\n        WScript.Quit 1\n    End If\nEnd Sub\n"
+        base += "Function IIf(cond, a, b)\n    If cond Then IIf = a Else IIf = b\nEnd Function\n"
+        base += "Function FormatNumberPDF(value, pattern)\n    FormatNumberPDF = FormatNumber(value, 2, -1, 0, 0)\nEnd Function\n"
+        base += "\nClass UIQuoteResult\n" + fields + "\nEnd Class\n"
+        comp_fields = re.sub(r" As (?:String|Double)\b", "", COMPONENT.split("Option Explicit", 1)[1])
+        base += "\nClass UIQuoteComponent\n" + comp_fields + "\nEnd Class\n"
+        for name in ("UICalculateQuote", "UIQuoteFlatHeight", "UIQuotePart",
+                     "UIQuoteComponents", "UIQuoteGussets", "UIQuoteReport",
+                     "UIQuoteSummaryCards", "UIQuoteComponentRows", "UIQuoteGussetRows",
+                     "UIQuoteTableRows", "UIQuoteTotalRows", "UIQuoteSheetStats", "UIQuoteSheetRows"):
+            base += procedure(CALCULATOR, name) + "\n"
+        for name in ("UIValidateSelections", "UIValidateDimensions", "UIInchesText", "UIParseInches"):
+            base += procedure(MODULE, name) + "\n"
+        base += procedure(CALCULATOR, "UIQuoteParsePrice") + "\n"
+        for name in ("UINestQuote", "UINestSort", "UINestMax", "UINestPack", "UINestMaxRects",
+                     "UINestFreeAdd", "UINestFreePrune", "UINestReport", "UINestBuildItems",
+                     "UINestFreeSubtract", "UINestEliminateSheet"):
+            base += procedure(NESTING, name) + "\n"
+
+        test_body = base + r"""
+Function UICalculateQuote(walls, orient, ret, material, thickness, length, width, height)
+    Set UICalculateQuote = UIQuoteWithPrice(walls, orient, ret, material, thickness, length, width, height, 0.7, 0.25, 0.25)
+End Function
+
+Sub CheckExample(q, name, expSheets, expBaseline, expParts, expAreaSqFt)
+    Dim p, i, j, area, parts, gap, margin
+    Assert q.NestAvailable, name & " nesting available"
+    Assert q.SheetCount = expSheets, name & " sheet count"
+    Assert q.NestBaselineSheets = expBaseline, name & " baseline sheets"
+    Assert q.NestTrialCount = 48, name & " 48 candidate layouts"
+    Assert Len(q.NestMethod) > 0, name & " nest method"
+    Assert q.SheetCount <= q.NestBaselineSheets, name & " no regression against baseline"
+    Assert Abs(Round(q.TotalArea / 144, 2) - expAreaSqFt) < 0.01, name & " total area sq ft"
+
+    ' Check bounds, clearances, area conservation
+    p = q.SheetPlacements
+    gap = q.PartGap
+    margin = q.EdgeMargin
+    area = 0
+    parts = 0
+    For i = 0 To UBound(p)
+        Assert p(i, 0) >= 1 And p(i, 0) <= q.SheetCount, name & " sheet index"
+        Assert p(i, 2) >= margin - 0.000001 And p(i, 3) >= margin - 0.000001, name & " near margin"
+        Assert p(i, 2) + p(i, 4) <= 120 - margin + 0.000001, name & " far length"
+        Assert p(i, 3) + p(i, 5) <= 60 - margin + 0.000001, name & " far width"
+        Assert p(i, 6) = 0 Or p(i, 6) = 90, name & " rotation"
+        area = area + p(i, 7)
+        parts = parts + p(i, 8)
+        For j = i + 1 To UBound(p)
+            If p(i, 0) = p(j, 0) Then
+                Assert p(i, 2) + p(i, 4) + gap <= p(j, 2) + 0.000001 Or _
+                       p(j, 2) + p(j, 4) + gap <= p(i, 2) + 0.000001 Or _
+                       p(i, 3) + p(i, 5) + gap <= p(j, 3) + 0.000001 Or _
+                       p(j, 3) + p(j, 5) + gap <= p(i, 3) + 0.000001, name & " clearance"
+            End If
+        Next
+    Next
+    Assert parts = expParts, name & " physical parts count"
+    Assert Abs(area - q.TotalArea) < 0.000001, name & " profile area conservation"
+
+    ' Check layout determinism
+    UINestQuote q, 0.25, 0.25
+    Assert UBound(q.SheetPlacements) = UBound(p), name & " deterministic count"
+    For i = 0 To UBound(p)
+        For j = 0 To 8
+            Assert p(i, j) = q.SheetPlacements(i, j), name & " deterministic placement field " & j
+        Next
+    Next
+End Sub
+
+Dim q
+' Five reference examples reconstructed from attached PDFs:
+' 1. rad290EE: 4 walls, 100x100x24, Single return 2 inches, Mild Steel, 1/4 inch
+Set q = UICalculateQuote(4, "N/A", "Single return 2 inches", "Mild Steel", "1/4 inch", 100, 100, 24)
+CheckExample q, "rad290EE (100x100x24 T.25)", 4, 4, 34, 124.98
+
+' 2. rad34B17: 4 walls, 100x100x24, Single return 2 inches, Mild Steel, 3/16 inch
+Set q = UICalculateQuote(4, "N/A", "Single return 2 inches", "Mild Steel", "3/16 inch", 100, 100, 24)
+CheckExample q, "rad34B17 (100x100x24 T.1875)", 4, 4, 34, 125.49
+
+' 3. radC91FD: 4 walls, 100x60x48, No return, Mild Steel, 1/4 inch
+Set q = UICalculateQuote(4, "N/A", "No return", "Mild Steel", "1/4 inch", 100, 60, 48)
+CheckExample q, "radC91FD (100x60x48 T.25)", 6, 6, 28, 222.12
+
+' 4. rad9B80B: 4 walls, 500x650x12, Single return 1 inch, Mild Steel, 3/16 inch
+Set q = UICalculateQuote(4, "N/A", "Single return 1 inch", "Mild Steel", "3/16 inch", 500, 650, 12)
+CheckExample q, "rad9B80B (500x650x12 T.1875)", 8, 8, 180, 328.79
+
+' 5. radC046F: 4 walls, 300x300x30, Double return, Mild Steel, 3/16 inch
+Set q = UICalculateQuote(4, "N/A", "Double return", "Mild Steel", "3/16 inch", 300, 300, 30)
+CheckExample q, "radC046F (300x300x30 T.1875)", 13, 13, 94, 501.03
+
+WScript.Echo "PASS: five realistic reference examples and determinism"
+"""
+        with tempfile.TemporaryDirectory(prefix="test-vbs-") as folder:
+            runner = Path(folder) / "run.vbs"
+            runner.write_text(test_body, encoding="ascii")
+            res = subprocess.run(["cscript", "//Nologo", str(runner)], capture_output=True, text=True, timeout=60)
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            self.assertIn("PASS: five realistic reference examples and determinism", res.stdout)

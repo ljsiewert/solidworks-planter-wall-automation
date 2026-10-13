@@ -37,6 +37,8 @@ button/shortcut pointing at that procedure.
    class and [ui_quote_calculator.bas](ui_quote_calculator.bas) as a standard
    module. Insert a UserForm named `UserForm_QuoteReport` and paste the entire
    [UserForm_QuoteReport.frm](UserForm_QuoteReport.frm) code behind it.
+   Import [ui_quote_nesting.bas](ui_quote_nesting.bas) as a standard module
+   for the sheet-layout estimate.
    Import [UIQuoteComponent.cls](UIQuoteComponent.cls) as a class for the
    component area breakdown. For an existing quote installation, replace
    `UIQuoteResult` and `ui_quote_calculator` and add `UIQuoteComponent`.
@@ -124,8 +126,8 @@ not access an active document, equation manager, design table, Excel or runtime
 logger. No clean template, destination folder or exporters are needed; no files
 are written. Launch `RunWithUI` even with no document open, choose **Quote only
 (input-only material estimate)** and click Run. The results window opens with
-a summary of material-only cost, profile weight/area and the selected design,
-followed by a wall/base/end component table and a separate gusset table.
+a header showing the material-only cost and selected design, summary tiles,
+a wall/base/end component table and a separate gusset table.
 **Technical Details** switches to the
 full scrollable, copyable calculation report; **Back to Summary** returns.
 It is **not a final manufacturing quote**.
@@ -197,9 +199,9 @@ The component report implements [Component_Quote_Formulas.txt](../Component_Quot
   cutout deduction. This is summed profile area, not purchased sheet area.
 
 Holes, notches and reliefs are **not deducted**: the supplied rectangular/
-trapezoidal profiles are explicitly labeled. 120 x 60-inch stock is context
-only. Sheet counts and purchased-sheet costs remain **NOT CALCULATED** until
-cutting/nesting rules and cutout treatment are established.
+trapezoidal profiles are explicitly labeled. The sheet estimator below uses
+120 x 60-inch stock. Purchased-sheet costs remain **NOT CALCULATED**; profile
+costs above do not include offcuts.
 The local workbook and `equations.txt` export remain Git-ignored.
 
 #### Profile weight and material pricing
@@ -238,7 +240,203 @@ Updating an existing installation: replace `UserForm_AutomationUI`,
 `ui_quote_calculator`, `UIQuoteResult` and `UIQuoteComponent`, then compile
 and save.
 
+#### Sheet nesting estimate and Operations verification
+
+Quote-only now includes editable **Quote part gap (in)** and **Quote edge
+margin (in)** inputs, both defaulting to **0.25**. They are disabled/ignored
+for model and preview runs. Margins apply at all four sheet edges. Rotation
+by 90 degrees is allowed, as approved by the user. The current quote contains
+one material/thickness; sheets are not shared between separate quotes.
+
+These defaults are **provisional estimating assumptions, not an ANSI/ISO/ASTM
+laser-spacing standard**. The published
+[Lapas spacing guidance](https://lapas.io/blog/part-spacing-nesting/)
+describes process/thickness-dependent starting points (e.g. 2.5 mm for fiber
+laser and 3.5 mm for CO2 laser at 6 mm thickness), and calls for shop testing.
+It does not prescribe our 0.25-inch defaults. We selected a more conservative
+6.35 mm allowance pending identification of the shop's laser and operating
+requirements. The sheet-edge margin is likewise an assumption, not a value
+certified by that source.
+
+**Operations must verify before quoting purchased sheets or using a layout:**
+
+- Machine/process, assist gas, lead-in/pierce clearance and usable sheet size.
+- Part spacing, edge trim, clamps and sheet handling constraints.
+- Rotation/grain/finish restrictions and whether opposed gusset pairs work.
+- Thermal cut sequence, small-part support, tabs and remnant reuse policy.
+- Actual cutouts/reliefs and calibrated flat-pattern measurements.
+
+Algorithm:
+
+1. Expand all quantities into physical parts; skip zero quantities.
+2. Group same-profile mounting/internal gussets into opposed pairs, allowing
+   a mounting/internal mixed pair. Trapezoid height H, bottom B, top A:
+   horizontal diagonal separation = `gap * sqrt(1 + ((B-A)/H)^2)`.
+   The resulting pair envelope is `(B+A+separation) x H`, containing two
+   actual trapezoids with perpendicular clearance equal to the requested
+   gap. An odd final gusset uses a single B x H envelope. If the pair envelope
+   does not fit the usable sheet in either rotation, fall back to individual
+   gussets rather than rejecting otherwise fitting parts.
+3. Retain the original 32-trial baseline: four descending part orders (area, longest
+   side, shortest side and perimeter), two free-rectangle fit scores (least
+   residual area and best short-side fit), and three guillotine split rules.
+   The original four layouts run first, and ties keep the earlier result.
+   Then try eight MaxRects layouts (four orders x two fit scores). MaxRects
+   tracks overlapping candidate free rectangles across earlier split
+   boundaries. Every placed envelope is subtracted from all intersecting
+   spaces, and contained/duplicate free rectangles are removed so candidates
+   never include occupied material. Candidate areas must not be summed as
+   remaining stock because they can overlap.
+   Then evaluate up to eight all-single-gusset MaxRects layouts and eight
+   mixed layouts (approximately half paired and half single), for up to
+   48 candidate layouts. This allows singles to fill narrow spaces without
+   discarding the paired baseline. Ties retain the earlier candidate.
+   If the area lower bound is reached, redundant remaining trials can stop.
+   The trial count indicates the configured candidate search, not solver
+   iterations. This is heuristic rectangle/envelope nesting, not unrestricted
+   polygon nesting or a proven optimum. Pair-envelope wedges remain unused.
+4. Respect part gaps and edge margins and allow 0/90-degree bundle rotation.
+   A virtual trailing gap avoids incorrectly requiring extra clearance at
+   the sheet boundary. Store each bundle's sheet, coordinates, envelope,
+   rotation, actual profile area and physical part count for audit.
+5. Try to eliminate the least-used sheet by rebuilding MaxRects free spaces
+   on the retained sheets and relocating all its bundles. Reserve the same
+   padded gap and margins. Commit only a complete, clearance-checked
+   elimination; an unsuccessful attempt leaves the source layout unchanged.
+   This pass does not rearrange the already placed parts on retained sheets.
+
+Summary reports estimated sheet count, profile utilization and unused/scrap
+percentage. Technical Details includes per-sheet utilization, physical part
+counts and bundle placements in inches from the sheet's lower-left origin.
+The optional PDF preview below visualizes these placements; no cutting program
+or machine toolpaths are generated.
+
+`Utilization = total profile area / (sheet count * 7200) * 100`.
+`Unused/scrap = 100 - utilization`. The denominator is the full purchased
+sheet area, not just the usable area after margins. Pair envelopes are NOT
+used as the parts' profile area. Unused area includes potentially reusable
+remnants, gaps, margins and shape offcuts; it is not a prediction of discarded
+scrap weight. Holes/reliefs remain undeducted, as in the profile calculator.
+The area-only lower bound `ceiling(total profile area / 7200)` is reported
+separately and is not promised to be a feasible layout.
+
+For 300 x 200 x 20 inches, four walls, 1/4-inch Mild Steel, double return,
+the current combined heuristic estimates **7 sheets**, **72.6934% utilization** and
+**27.3066% unused area**, versus a 6-sheet area-only lower bound.
+
+Count mismatches, oversized bundles or quotes exceeding 2000 physical parts
+produce an explicit unavailable status rather than a misleading sheet count.
+Bad/negative settings raise actionable input errors. A 120-inch blank will
+not fit when any positive edge margin is reserved; do not silently trim it.
+Adjustments require Operations approval. The supported margin is <30 inches.
+Zero clearance is supported for exploration, not recommended as production
+approval or implicit common-line cutting.
+
+Install on the existing quote version: add `ui_quote_nesting`, replace
+`UIQuoteResult`, `ui_quote_calculator`, the input form code and the results
+form code, compile and save. No changes to `UIQuoteComponent` are needed.
+Live VBA compilation and comparison against the shop's laser nesting
+software remain required. Tests validate boundaries, non-overlap/spacing,
+rotations, quantities, paired gusset clearance and actual-profile area
+conservation, but do not validate the physical cutting process.
+
+Updating from the 32-trial estimator requires replacing
+[UIQuoteResult.cls](UIQuoteResult.cls), [ui_quote_nesting.bas](ui_quote_nesting.bas),
+[ui_quote_calculator.bas](ui_quote_calculator.bas),
+[ui_quote_layout_pdf.bas](ui_quote_layout_pdf.bas), and the code behind
+[UserForm_QuoteReport.frm](UserForm_QuoteReport.frm), compiling and saving.
+No external dependency or extra optimization button is needed. The search
+runs automatically when calculating a quote. Larger component counts take
+longer because of repeated packing and free-rectangle pruning.
+Tests compare the combined result against the prior 32 baseline layouts over the
+quote scenarios, and exercise all eight MaxRects choices for bounds, identity,
+area and gap preservation. A regression case reduces four sheets to three
+compared with the best of all 24 split trials; this does not imply every
+design will improve.
+
+#### Preview sheet layout
+
+**Preview Sheet Layout**, beside Technical Details, generates a PDF in the
+Windows temporary folder and opens it in the default PDF viewer. There is no
+folder picker or save step. A PDF viewer association is required. Temporary
+files use unique `Planter_Layout_*.pdf` names and are never overwritten.
+They remain in the temporary folder so an open viewer can continue reading
+them; they can be removed after closing the viewer during normal temp cleanup.
+Writing/opening errors are reported explicitly. The button is disabled when
+the sheet layout is unavailable.
+
+A landscape summary page opens the PDF, explaining flexible gusset trials,
+gusset pairing, rotations, clearance and fewest-sheets selection. It shows
+total parts, selected sheet count, profile/stock/unused areas, utilization and
+the area-only lower bound, selected method and previous baseline sheet count.
+This is a best-found estimate, not a guarantee of globally minimum scrap.
+Ties keep the first trial; pair-envelope wedges are
+not reclaimed, and the area-only bound does not establish a feasible nest.
+
+After the usage table, a Parts List page shows every part used in the layout
+(label, description, shape, profile size, total quantity and total area, with a
+TOTAL row); parts with zero quantity are omitted.
+
+Following the parts list, one landscape letter-size page per 120 x 60-inch sheet shows proportional
+component profiles, the stock border and a dashed usable-area boundary.
+Each part is labeled with its PNS component code: CW (Center Planter Wall),
+CBP (Center Planter Base Plate), SW (Side Planter Wall), SBP (Side Planter Base
+Plate), LW (Left Side Wall), RW (Right Side Wall), MG (Mounting Gusset) and CG
+(Center Gusset). Each sheet's legend lists only the parts on that sheet with
+their physical quantities. Paired gussets show both trapezoids and diagonal clearance;
+rotations and positions match the estimator, including single gussets.
+Each page gives material/thickness, gap/margin, sheet and overall utilization
+and unused percentages. Unused area includes reusable remnants, not just scrap.
+
+This is an **estimating layout, NOT a production cutting plan**.
+It is not full size and has no holes/reliefs, lead-ins, kerf compensation or
+cut order. The preview does not open a SolidWorks model, require Excel, or use
+the production PDF exporters. PDF generation uses plain VBA and Windows
+filesystem/shell services; no additional runtime PDF software is required
+besides the viewer.
+
+Install: remove the previous `ui_quote_layout_dxf` module if installed,
+import [ui_quote_layout_pdf.bas](ui_quote_layout_pdf.bas), and replace the
+code behind `UserForm_QuoteReport`. Compile and save. Test the button with a
+valid layout and an unavailable layout, and verify it opens your default viewer.
+Re-import [ui_quote_calculator.bas](ui_quote_calculator.bas) too; the
+redesigned results header uses its `UIQuoteSummaryCards` function. The original
+production DXF exporter is unchanged.
+
+PDF regression tests require `python -m pip install -r tests\requirements.txt`
+from the repository root. They load the generated PDF with pypdf in strict
+mode and check pages, labels, counts, utilization and profile geometry.
+Actual drawn polygons are also checked for overlap and minimum part clearance,
+including the diagonal edges of opposed gusset pairs.
+
 #### Results presentation
+
+The summary includes a **Sheet usage - Unused / potential scrap**
+table. Each sheet shows physical part quantity (a gusset pair counts as two),
+used profile area and unused stock area in square feet, utilization and unused
+percentage. A final TOTAL row sums quantities and areas; percentages are
+area-weighted, not summed. Each 120 x 60-inch purchased sheet contributes
+50 square feet. Unused includes margins, gaps, offcuts and reusable remnants,
+not a claim of discarded scrap. Values are displayed to two decimals while
+calculations retain full precision. Missing/invalid nesting withholds these
+values rather than showing zero unused material.
+
+The results form fits on one screen without form scrolling. A colored header
+shows the material estimate (or a review warning) and the design details.
+Five tiles show profile weight, profile area, sheet count, utilization and
+unused/potential-scrap percentage. The component, gusset and sheet-usage tables sit
+below them. Components with a quantity of 0 are hidden; if totals need review,
+every row stays visible. Each table is sized to its rows when the window opens,
+so there is no blank row at the bottom. Only the sheet-usage list scrolls internally when a design needs
+more sheets than fit in its visible rows. Technical Details replaces the
+summary area with the full report.
+
+The preview PDF opens with an **Optimization Summary** page. It has
+key-metric cards, a used-versus-unused bar, the optimization steps, selected
+layout facts and a "Keep in mind" box. Next come paginated sheet-usage tables
+with shaded headers, striped rows, right-aligned numbers and a used-versus-unused
+bar for each sheet. Totals appear in a highlighted row on the final usage page,
+before the individual sheet drawings.
 
 The summary/table rounds displayed dimensions to three decimal inches and
 weights/costs to two decimal places. Quantities are whole numbers. The raw

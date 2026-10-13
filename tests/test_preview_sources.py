@@ -39,7 +39,7 @@ class PreviewTests(unittest.TestCase):
             methods.append(body.replace("Private Sub", "Sub").replace("Public Sub", "Sub"))
         script = r'''
 Option Explicit
-Dim previewBox, quoteBox, folderBox, browseButton, pdfAssembliesBox, pdfComponentsBox, dxfBox, stepBox, priceBox
+Dim previewBox, quoteBox, folderBox, browseButton, pdfAssembliesBox, pdfComponentsBox, dxfBox, stepBox, priceBox, gapBox, marginBox
 Dim quoteOnly, exportPDFAssemblies, exportPDFComponents, exportDXF, exportSTEP
 Class Control
     Public Value, Enabled
@@ -59,6 +59,8 @@ Set pdfComponentsBox = New Control
 Set dxfBox = New Control
 Set stepBox = New Control
 Set priceBox = New Control
+Set gapBox = New Control
+Set marginBox = New Control
 '''
         script += "\n".join(methods) + r'''
 quoteBox.Value = True
@@ -82,6 +84,7 @@ quoteBox_Click
 Assert Not pdfAssembliesBox.Value And Not pdfAssembliesBox.Enabled, "Quote disables all PDFs"
 Assert Not folderBox.Enabled And Not browseButton.Enabled And Not previewBox.Enabled, "Quote needs no folder or preview"
 Assert priceBox.Enabled, "Quote enables editable pricing"
+Assert gapBox.Enabled And marginBox.Enabled, "Quote enables nesting settings"
 quoteBox.Value = False
 quoteBox_Click
 Assert folderBox.Enabled And previewBox.Enabled And pdfAssembliesBox.Enabled, "Leaving quote reenables controls"
