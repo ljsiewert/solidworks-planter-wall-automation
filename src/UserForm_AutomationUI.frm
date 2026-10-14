@@ -139,13 +139,14 @@ Private Sub BuildProperties()
     heading.Top = 8
     heading.Width = 420
     heading.Height = 28
-    Set priceBox = AddPropertyText("txtPricePerPound", "Quote material ($/lb)", 40, "0.70")
+    Set priceBox = AddPropertyText("txtPricePerPound", "Quote material ($/lb)", 40, "0.90")
     Set cutRateBox = AddPropertyText("txtCutRate", "Cutting labor ($/sheet)", 70, FormatRate(UIQuoteDefaultRate("Cut")))
     Set bendRateBox = AddPropertyText("txtBendRate", "Bending labor ($/bent part)", 100, FormatRate(UIQuoteDefaultRate("Bend")))
     Set weldRateBox = AddPropertyText("txtWeldRate", "Welding labor ($/part)", 130, FormatRate(UIQuoteDefaultRate("Weld")))
     Set paintRateBox = AddPropertyText("txtPaintRate", "Paint ($/sq ft, both sides)", 160, FormatRate(UIQuoteDefaultRate("Paint")))
     Set quoteMarginBox = AddPropertyText("txtQuoteMargin", "Default margin (%)", 190, FormatRate(UIQuoteDefaultRate("Margin")))
     Set gapBox = AddPropertyText("txtPartGap", "Quote part gap (in)", 220, "0.25")
+    gapBox.ControlTipText = "Operations baseline: 0.25 in; typical range 0-0.25 in. Zero models touching edges, not a shared laser toolpath."
     Set marginBox = AddPropertyText("txtEdgeMargin", "Quote edge margin (in)", 250, "0.25")
     Set heading = propertiesFrame.Controls.Add("Forms.Label.1", "lblPropertiesHelp", True)
     heading.Caption = "Bending applies only when a return is selected (wall and side wall parts). " & _
@@ -218,7 +219,7 @@ Private Sub propertiesDoneButton_Click()
 End Sub
 
 Private Sub propertiesResetButton_Click()
-    priceBox.Text = "0.70"
+    priceBox.Text = "0.90"
     cutRateBox.Text = FormatRate(UIQuoteDefaultRate("Cut"))
     bendRateBox.Text = FormatRate(UIQuoteDefaultRate("Bend"))
     weldRateBox.Text = FormatRate(UIQuoteDefaultRate("Weld"))

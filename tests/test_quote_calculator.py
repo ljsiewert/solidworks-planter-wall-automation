@@ -122,7 +122,9 @@ class QuoteTests(unittest.TestCase):
                           "OpenDoc", "Save", "Excel", "runLogger"):
             self.assertNotIn(forbidden, CALCULATOR)
         self.assertNotIn("pdfAssembliesBox.Value = True", FORM)
-        self.assertIn('AddPropertyText("txtPricePerPound", "Quote material ($/lb)", 40, "0.70")', FORM)
+        self.assertIn('AddPropertyText("txtPricePerPound", "Quote material ($/lb)", 40, "0.90")', FORM)
+        self.assertIn('priceBox.Text = "0.90"', FORM)
+        self.assertIn("typical range 0-0.25 in", FORM)
         self.assertIn("UIQuotePricing quoteValues, CBool(paintedToggle.Value)", quote)
         self.assertIn('"Forms.ToggleButton.1", "tglPainted"', FORM)
         self.assertIn('AddButton("cmdProperties", "Properties..."', FORM)
@@ -136,7 +138,7 @@ class QuoteTests(unittest.TestCase):
         self.assertIn("height, pricePerPound, partGap, edgeMargin)", quote)
         self.assertIn("UIQuoteParsePrice = UIParseInches(text)", CALCULATOR)
         self.assertIn("no currency symbol or commas", CALCULATOR)
-        self.assertIn("Optional ByVal pricePerPound As Double = 0.7", CALCULATOR)
+        self.assertIn("Optional ByVal pricePerPound As Double = 0.9", CALCULATOR)
 
     @unittest.skipUnless(shutil.which("cscript"), "Windows Script Host required")
     def test_calculated_values_boundaries_and_report(self):
@@ -154,7 +156,7 @@ class QuoteTests(unittest.TestCase):
             body = re.sub(r"(\w+)\(0 To ([^\n)]+)\)", r"\1(\2)", body)
             body = body.replace("usedSheets(1 To sheets)", "usedSheets(sheets)")
             if name == "UICalculateQuote":
-                body = body.replace("Optional ByVal pricePerPound = 0.7", "ByVal pricePerPound")
+                body = body.replace("Optional ByVal pricePerPound = 0.9", "ByVal pricePerPound")
                 body = body.replace("Optional ByVal partGap = 0.25", "ByVal partGap")
                 body = body.replace("Optional ByVal edgeMargin = 0.25", "ByVal edgeMargin")
                 body = body.replace("UICalculateQuote", "UIQuoteWithPrice")
@@ -238,7 +240,7 @@ End Class
             script += procedure(PDF, name) + "\n"
         script += r'''
 Function UICalculateQuote(walls, orient, ret, material, thickness, length, width, height)
-    Set UICalculateQuote = UIQuoteWithPrice(walls, orient, ret, material, thickness, length, width, height, 0.7, 0.25, 0.25)
+    Set UICalculateQuote = UIQuoteWithPrice(walls, orient, ret, material, thickness, length, width, height, 0.9, 0.25, 0.25)
 End Function
 Sub CheckNest(q)
     Dim p, i, j, dx, dy, area, parts, pairs, gap, margin, occurrences, labels
@@ -439,10 +441,10 @@ Set part = q.Components(7)
 Assert part.Quantity = 50, "Center gusset quantity"
 Assert Abs(q.TotalArea - 162600.4588) < 0.000001, "Complete reference area"
 Assert Abs(q.Density - 0.283599242) < 0.000000001, "7850 kg/m3 converted to lb/in3"
-Assert q.PricePerPound = 0.7, "Default price"
+Assert q.PricePerPound = 0.9, "Default price"
 Assert Abs(q.TotalWeight - q.TotalArea * q.Thickness * q.Density) < 0.000001, "Profile weight formula"
-Assert Abs(q.TotalMaterialCost - q.TotalWeight * 0.7) < 0.000001, "Material cost formula"
-Set other = UIQuoteWithPrice(4, "N/A", "Double return", "Borcon Weathering Steel", "1/4 inch", 300, 450, 48, 1.4, 0.25, 0.25)
+Assert Abs(q.TotalMaterialCost - q.TotalWeight * 0.9) < 0.000001, "Material cost formula"
+Set other = UIQuoteWithPrice(4, "N/A", "Double return", "Borcon Weathering Steel", "1/4 inch", 300, 450, 48, 1.8, 0.25, 0.25)
 Assert other.Density = q.Density And other.TotalWeight = q.TotalWeight, "Same density for both materials"
 Assert Abs(other.TotalMaterialCost - q.TotalMaterialCost * 2) < 0.000001, "User-entered price drives cost"
 Set other = UICalculateQuote(4, "N/A", "Single return 1 inch", "Mild Steel", "3/16 inch", 400, 400, 23.75)
@@ -450,15 +452,15 @@ Assert Abs(other.TotalArea - 71582.9430666667) < 0.000001, "User example area re
 Assert Abs(other.TotalWeight - 3806.4128265) < 0.00001, "User example weight"
 Assert InStr(report, "SELL PRICE: $" & FormatNumber(q.SellPrice, 2)) > 0, "Report shows sell price"
 Assert InStr(report, "NOT CALCULATED") = 0, "Purchased-sheet cost is now priced"
-Assert q.HasPricing And Not q.Painted And q.MarginPercent = 30, "Default pricing applied"
+Assert q.HasPricing And Not q.Painted And q.MarginPercent = 50, "Default pricing applied"
 Assert Abs(q.SheetWeight - q.SheetCount * 7200 * 0.25 * q.Density) < 0.000001, "Purchased sheet weight"
-Assert Abs(q.SheetMaterialCost - q.SheetWeight * 0.7) < 0.000001 And q.SheetMaterialCost > q.TotalMaterialCost, "Material includes scrap"
+Assert Abs(q.SheetMaterialCost - q.SheetWeight * 0.9) < 0.000001 And q.SheetMaterialCost > q.TotalMaterialCost, "Material includes scrap"
 Assert q.CutCost = 75 * q.SheetCount, "Cutting per sheet"
-Assert q.WeldedParts = 6 + 6 + 8 + 8 + 2 + 2 + 28 + 50 And q.WeldCost = 8 * q.WeldedParts, "Welding per part"
+Assert q.WeldedParts = 6 + 6 + 8 + 8 + 2 + 2 + 28 + 50 And q.WeldCost = 10 * q.WeldedParts, "Welding per part"
 Assert q.BentParts = 6 + 8 + 2 + 2 And q.BendCost = 5 * q.BentParts, "Bending only walls and side walls with returns"
 Assert q.PaintCost = 0 And q.PaintArea = 0, "Unpainted has no paint cost"
 Assert Abs(q.TotalCost - (q.SheetMaterialCost + q.LaborCost)) < 0.000001, "Total cost"
-Assert Abs(q.SellPrice - q.TotalCost / 0.7) < 0.000001 And Abs(q.Profit - q.SellPrice * 0.3) < 0.000001, "Gross margin sell price"
+Assert Abs(q.SellPrice - q.TotalCost * 2) < 0.000001 And Abs(q.Profit - q.SellPrice * 0.5) < 0.000001, "Gross margin sell price"
 UIQuotePricing q, True, 100, 10, 4, 3, 25
 Assert Abs(q.PaintArea - 2 * q.TotalArea / 144) < 0.000001 And Abs(q.PaintCost - 3 * q.PaintArea) < 0.000001, "Paint both sides"
 Assert q.CutCost = 100 * q.SheetCount And q.BendCost = 10 * q.BentParts And q.WeldCost = 4 * q.WeldedParts, "Custom labor rates"
@@ -505,7 +507,7 @@ summary = UIQuoteSummaryCards(q)
 rows = UIQuoteComponentRows(q)
 Assert UBound(summary, 1) = 6 And UBound(summary, 2) = 1, "Headline, design and five summary tiles"
 Assert summary(0, 0) = "QUOTE SELL PRICE  (30.00% margin)" And summary(0, 1) = "$" & FormatNumber(q.SellPrice, 2), "Summary leads with sell price"
-Assert InStr(summary(1, 1), "1/4 in  |  $0.70/lb") > 0, "Readable thickness and price"
+Assert InStr(summary(1, 1), "1/4 in  |  $0.90/lb") > 0, "Readable thickness and price"
 Assert InStr(summary(1, 1), "300.000 x 450.000 x 48.000 in") > 0, "Rounded summary dimensions"
 Assert InStr(summary(1, 1), "CENTER_WALL_PATTERN_COUNT") = 0, "Technical equations not in summary"
 Assert summary(2, 1) = FormatNumber(q.TotalWeight, 2) & " lb" And summary(4, 1) = CStr(q.SheetCount), "Weight and sheet tiles"
@@ -728,8 +730,14 @@ Assert code <> 0 And previewPath = "", "Unavailable preview never launches viewe
 UINestQuote q, 0.25, 0
 CheckNest q
 Set q = UICalculateQuote(1, "N/A", "No return", "Mild Steel", "1/4 inch", 100, 100, 20)
+pdfText = UIQuoteLayoutPDF(q)
+Assert InStr(pdfText, "ZERO GAP:") = 0, "Nonzero gap has no co-edge warning"
+Assert InStr(pdfText, "CypCut can use finer angles") > 0, "PDF explains production rotation difference"
 UINestQuote q, 0, 0
 CheckNest q
+pdfText = UIQuoteLayoutPDF(q)
+Assert InStr(pdfText, "ZERO GAP: touching edges only") > 0, "Zero-gap PDF warns about co-edge setup"
+Assert InStr(pdfText, "Operations must set up co-edge/common-line cuts in CypCut") > 0, "Zero gap is not a toolpath"
 customItems(0, 0) = "Rotation test"
 customItems(0, 1) = 40
 customItems(0, 2) = 70
@@ -1207,7 +1215,7 @@ WScript.Echo "PASS: demonstrable improvements and sheet elimination"
             body = re.sub(r"(\w+)\(0 To ([^\n)]+)\)", r"\1(\2)", body)
             body = body.replace("usedSheets(1 To sheets)", "usedSheets(sheets)").replace("0#", "0")
             if name == "UICalculateQuote":
-                body = body.replace("Optional ByVal pricePerPound = 0.7", "ByVal pricePerPound")
+                body = body.replace("Optional ByVal pricePerPound = 0.9", "ByVal pricePerPound")
                 body = body.replace("Optional ByVal partGap = 0.25", "ByVal partGap")
                 body = body.replace("Optional ByVal edgeMargin = 0.25", "ByVal edgeMargin")
                 body = body.replace("UICalculateQuote", "UIQuoteWithPrice")
@@ -1254,7 +1262,7 @@ WScript.Echo "PASS: demonstrable improvements and sheet elimination"
 
         test_body = base + r"""
 Function UICalculateQuote(walls, orient, ret, material, thickness, length, width, height)
-    Set UICalculateQuote = UIQuoteWithPrice(walls, orient, ret, material, thickness, length, width, height, 0.7, 0.25, 0.25)
+    Set UICalculateQuote = UIQuoteWithPrice(walls, orient, ret, material, thickness, length, width, height, 0.9, 0.25, 0.25)
 End Function
 
 Sub CheckExample(q, name, expSheets, expBaseline, expParts, expAreaSqFt)

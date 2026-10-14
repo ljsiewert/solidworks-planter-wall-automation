@@ -130,7 +130,10 @@ Private Function UIPDFSummary(ByVal result As UIQuoteResult) As String
     text = text & UIPDFText(50, 134, 9.5, "- Best layout found by these heuristics - not a guaranteed global minimum or the least possible scrap.")
     text = text & UIPDFText(50, 118, 9.5, "- Unused material includes margins, gaps, offcuts and reusable remnants - not all discarded scrap.")
     text = text & UIPDFText(50, 102, 9.5, "- Not modeled: holes/reliefs, kerf, lead-ins, clamps, common-line cuts and remnant reuse.")
-    text = text & UIPDFText(50, 86, 9.5, "- Only 0/90-degree rotations are tested; free wedges inside gusset-pair envelopes are not reused.")
+    text = text & UIPDFText(50, 86, 9.5, "- Estimator turns parts 0/90 degrees; CypCut can use finer angles. Operations controls production nesting.")
+    If result.PartGap = 0 Then
+        text = text & UIPDFStyledText(36, 64, 8.5, "ZERO GAP: touching edges only. Operations must set up co-edge/common-line cuts in CypCut.", True, "0.6 0.27 0")
+    End If
     text = text & UIPDFStyledText(36, 50, 10, "ESTIMATING LAYOUT - NOT A PRODUCTION CUTTING PLAN. Operations approval required.", True, navy)
     text = text & UIPDFStyledText(36, 34, 9, "Next pages: sheet usage table, parts list with total quantities, then a reduced-scale layout of each sheet.", False, gray)
     UIPDFSummary = text

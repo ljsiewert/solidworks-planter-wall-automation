@@ -4,7 +4,7 @@ Option Explicit
 Public Function UICalculateQuote(ByVal walls As Long, ByVal orientation As String, _
     ByVal returnLabel As String, ByVal material As String, ByVal thicknessLabel As String, _
     ByVal length As Double, ByVal width As Double, ByVal height As Double, _
-    Optional ByVal pricePerPound As Double = 0.7, _
+    Optional ByVal pricePerPound As Double = 0.9, _
     Optional ByVal partGap As Double = 0.25, Optional ByVal edgeMargin As Double = 0.25) As UIQuoteResult
     Dim result As UIQuoteResult
     Dim available As Double
@@ -68,9 +68,9 @@ Public Function UIQuoteDefaultRate(ByVal name As String) As Double
     Select Case name
         Case "Cut": UIQuoteDefaultRate = 75
         Case "Bend": UIQuoteDefaultRate = 5
-        Case "Weld": UIQuoteDefaultRate = 8
+        Case "Weld": UIQuoteDefaultRate = 10
         Case "Paint": UIQuoteDefaultRate = 2.5
-        Case "Margin": UIQuoteDefaultRate = 30
+        Case "Margin": UIQuoteDefaultRate = 50
         Case Else: Err.Raise vbObjectError + 2400, "UIQuoteDefaultRate", "Unknown rate: " & name
     End Select
 End Function
@@ -213,7 +213,7 @@ Public Function UIQuoteParsePrice(ByVal text As String) As Double
     Exit Function
 InvalidPrice:
     Err.Raise vbObjectError + 2400, "UIQuoteParsePrice", _
-        "Enter a positive decimal material price in $/lb, for example 0.70 (no currency symbol or commas)."
+        "Enter a positive decimal material price in $/lb, for example 0.90 (no currency symbol or commas)."
 End Function
 
 Private Function UIQuoteFlatHeight(ByVal height As Double, ByVal thickness As Double, _

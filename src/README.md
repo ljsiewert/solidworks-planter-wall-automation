@@ -206,12 +206,12 @@ The local workbook and `equations.txt` export remain Git-ignored.
 
 #### Profile weight and material pricing
 
-The quote-only **Quote material ($/lb)** input defaults to **0.70**, can be
+The quote-only **Quote material ($/lb)** input defaults to **0.90**, can be
 changed for each run under **Properties...**, and is ignored for preview and
 full model runs.
 It accepts positive dot-decimal numbers, without currency symbols, commas,
 fractions or units. Zero/negative/missing prices produce explicit errors.
-The API also validates positive prices; its optional default is 0.70.
+The API also validates positive prices; its optional default is 0.90.
 
 Both Mild Steel and Borcon Weathering Steel use the user-approved estimating
 density **7850 kg/m^3**, converted as `7850 * 0.0254^3 / 0.45359237` =
@@ -235,7 +235,7 @@ labor and margin. No density difference between material labels is invented;
 different purchase prices can be entered for each quote.
 For the 400 x 400 x 23.75-inch, four-wall, 3/16-inch, single 1-inch return
 example, profile weight is approximately **3806.4128 lb**, and material cost
-at 0.70/lb is **$2664.49**.
+at 0.90/lb is **$3425.77**.
 
 Updating an existing installation: replace `UserForm_AutomationUI`,
 `ui_quote_calculator`, `UIQuoteResult` and `UIQuoteComponent`, then compile
@@ -249,20 +249,20 @@ only by Quote only:
 
 | Property | Default | Applies to |
 |---|---|---|
-| Quote material ($/lb) | 0.70 | Full purchased sheets: sheets x 120 x 60 x T x density |
+| Quote material ($/lb) | 0.90 | Full purchased sheets: sheets x 120 x 60 x T x density |
 | Cutting labor ($/sheet) | 75.00 | Every purchased sheet |
 | Bending labor ($/bent part) | 5.00 | Center/side planter walls and left/right side walls, only when a return is selected |
-| Welding labor ($/part) | 8.00 | Every physical part (all parts are welded) |
+| Welding labor ($/part) | 10.00 | Every physical part (all parts are welded) |
 | Paint ($/sq ft, both sides) | 2.50 | 2 x total profile area, only when **Painted** is on |
-| Default margin (%) | 30.00 | Gross margin, 0-95% |
+| Default margin (%) | 50.00 | Gross margin, 0-95% |
 | Quote part gap / edge margin (in) | 0.25 / 0.25 | Sheet nesting |
 
 Labor and paint defaults are placeholders until time studies are available.
 The **Painted / Not painted** toggle sits next to Material.
 
 Total cost = purchased-sheet material + labor + paint. Sell price uses gross
-margin: `sell = total cost / (1 - margin)`, so a 30% margin means profit is
-30% of the sell price. Pricing is withheld when quantities disagree or no
+margin: `sell = total cost / (1 - margin)`, so the default 50% margin means
+sell price is twice total cost. Pricing is withheld when quantities disagree or no
 sheet layout is available.
 
 The results page leads with the sell price and shows a pricing row (material,
@@ -278,14 +278,33 @@ They are ignored for model and preview runs. Margins apply at all four sheet edg
 by 90 degrees is allowed, as approved by the user. The current quote contains
 one material/thickness; sheets are not shared between separate quotes.
 
-These defaults are **provisional estimating assumptions, not an ANSI/ISO/ASTM
+Operations confirmed **0.25 in is a good part-gap baseline**, with typical
+shop settings of **0-0.25 in**. Keep 0.25 as the default; zero is an optional
+touching-edge estimate for flat panels. Zero gap does not generate shared
+cut paths, reduce cutting labor automatically, or establish production
+clearances. Operations sets up "co-edge" / common-line cutting in CypCut.
+Other nonnegative gaps remain available for job-specific requirements.
+
+The workflow remains: **individual component DXFs -> quantities in CypCut ->
+Operations-controlled nesting -> cutting**. The PDF estimates purchased stock
+and utilization; it is not a production nest or toolpath. Operations may group
+large jobs by section to simplify unloading, which can change sheet usage.
+No combined nest DXF or section-specific production nesting is added.
+
+CypCut can rotate in finer increments (Operations mentioned 20 degrees);
+the estimator still tests 0/90-degree bundle rotations. Its bounding-box
+packing cannot safely gain arbitrary-angle rotations without polygon-level
+collision/spacing checks. Finer angles may improve a production nest, while
+section grouping may reduce utilization; no fixed adjustment factor is applied.
+The PDF states this distinction and flags zero-gap estimates explicitly.
+
+These settings are **estimating assumptions, not an ANSI/ISO/ASTM
 laser-spacing standard**. The published
 [Lapas spacing guidance](https://lapas.io/blog/part-spacing-nesting/)
 describes process/thickness-dependent starting points (e.g. 2.5 mm for fiber
 laser and 3.5 mm for CO2 laser at 6 mm thickness), and calls for shop testing.
-It does not prescribe our 0.25-inch defaults. We selected a more conservative
-6.35 mm allowance pending identification of the shop's laser and operating
-requirements. The sheet-edge margin is likewise an assumption, not a value
+It does not prescribe our 0.25-inch defaults. Operations has confirmed the
+6.35 mm part-gap baseline; the sheet-edge margin remains an assumption, not a value
 certified by that source.
 
 **Operations must verify before quoting purchased sheets or using a layout:**
