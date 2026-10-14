@@ -58,7 +58,153 @@ Public Function UICalculateQuote(ByVal walls As Long, ByVal orientation As Strin
     End If
     UIQuoteComponents result
     UINestQuote result, partGap, edgeMargin
+    UIQuotePricing result, False, UIQuoteDefaultRate("Cut"), UIQuoteDefaultRate("Bend"), _
+        UIQuoteDefaultRate("Weld"), UIQuoteDefaultRate("Paint"), UIQuoteDefaultRate("Margin")
     Set UICalculateQuote = result
+End Function
+
+' Standard placeholder rates until time studies are available; editable under Properties.
+Public Function UIQuoteDefaultRate(ByVal name As String) As Double
+    Select Case name
+        Case "Cut": UIQuoteDefaultRate = 75
+        Case "Bend": UIQuoteDefaultRate = 5
+        Case "Weld": UIQuoteDefaultRate = 8
+        Case "Paint": UIQuoteDefaultRate = 2.5
+        Case "Margin": UIQuoteDefaultRate = 30
+        Case Else: Err.Raise vbObjectError + 2400, "UIQuoteDefaultRate", "Unknown rate: " & name
+    End Select
+End Function
+
+' Labor = cutting per purchased sheet + bending per bent part (returns only) + welding per part.
+' Paint covers both sides of every profile. Material uses full purchased sheets so scrap is paid for.
+Public Sub UIQuotePricing(ByVal result As UIQuoteResult, ByVal painted As Boolean, _
+    ByVal cutRate As Double, ByVal bendRate As Double, ByVal weldRate As Double, _
+    ByVal paintRate As Double, ByVal marginPercent As Double)
+    Dim i As Long
+    If cutRate < 0 Or bendRate < 0 Or weldRate < 0 Or paintRate < 0 Then
+        Err.Raise vbObjectError + 2400, "UIQuotePricing", "Labor and paint rates cannot be negative."
+    End If
+    result.Painted = painted
+    result.CutRate = cutRate
+    result.BendRate = bendRate
+    result.WeldRate = weldRate
+    result.PaintRate = paintRate
+    result.HasPricing = result.HasValidTotals And result.NestAvailable And result.SheetCount > 0
+    result.BentParts = 0
+    result.WeldedParts = 0
+    For i = 0 To UBound(result.Components)
+        result.WeldedParts = result.WeldedParts + result.Components(i).Quantity
+    Next i
+    If result.ReturnLabel <> "No return" Then
+        result.BentParts = result.Components(0).Quantity + result.Components(2).Quantity + _
+            result.Components(4).Quantity + result.Components(5).Quantity
+    End If
+    result.SheetWeight = 0
+    result.SheetMaterialCost = 0
+    result.CutCost = 0
+    If result.HasPricing Then
+        result.SheetWeight = result.SheetCount * 7200 * result.Thickness * result.Density
+        result.SheetMaterialCost = result.SheetWeight * result.PricePerPound
+        result.CutCost = cutRate * result.SheetCount
+    End If
+    result.BendCost = bendRate * result.BentParts
+    result.WeldCost = weldRate * result.WeldedParts
+    result.LaborCost = result.CutCost + result.BendCost + result.WeldCost
+    result.PaintArea = 0
+    If painted Then result.PaintArea = 2 * result.TotalArea / 144
+    result.PaintCost = paintRate * result.PaintArea
+    result.TotalCost = result.SheetMaterialCost + result.LaborCost + result.PaintCost
+    UIQuoteSetMargin result, marginPercent
+End Sub
+
+' Gross margin: profit is the given percentage of the sell price.
+Public Sub UIQuoteSetMargin(ByVal result As UIQuoteResult, ByVal marginPercent As Double)
+    If marginPercent < 0 Or marginPercent > 95 Then
+        Err.Raise vbObjectError + 2400, "UIQuoteSetMargin", "Margin must be between 0% and 95%."
+    End If
+    result.MarginPercent = marginPercent
+    result.SellPrice = result.TotalCost / (1 - marginPercent / 100)
+    result.Profit = result.SellPrice - result.TotalCost
+End Sub
+
+Public Function UIQuoteParseRate(ByVal text As String, ByVal label As String) As Double
+    Dim cleaned As String
+    cleaned = Trim$(text)
+    If Len(cleaned) > 0 And InStr(cleaned, "0") > 0 And Len(Replace(Replace(cleaned, "0", ""), ".", "")) = 0 _
+        And Len(cleaned) - Len(Replace(cleaned, ".", "")) <= 1 Then
+        UIQuoteParseRate = 0
+        Exit Function
+    End If
+    On Error GoTo InvalidRate
+    UIQuoteParseRate = UIParseInches(cleaned)
+    Exit Function
+InvalidRate:
+    Err.Raise vbObjectError + 2400, "UIQuoteParseRate", _
+        label & ": enter 0 or a positive decimal number (no $, % or commas)."
+End Function
+
+' Rows: caption, value, tooltip breakdown for material, labor, paint, total cost and profit.
+Public Function UIQuotePricingCards(ByVal result As UIQuoteResult) As Variant
+    Dim cards(0 To 4, 0 To 2) As Variant
+    cards(0, 0) = "Material (purchased sheets)"
+    cards(1, 0) = "Labor (cut / bend / weld)"
+    cards(2, 0) = "Paint"
+    cards(3, 0) = "Total cost"
+    cards(4, 0) = "Margin %  |  profit"
+    If Not result.HasPricing Then
+        cards(0, 1) = "Withheld"
+        cards(1, 1) = "Withheld"
+        cards(2, 1) = "Withheld"
+        cards(3, 1) = "Withheld"
+        cards(4, 1) = "Withheld"
+        cards(0, 2) = "Pricing needs valid quantities and a sheet layout."
+        cards(1, 2) = cards(0, 2)
+        cards(2, 2) = cards(0, 2)
+        cards(3, 2) = cards(0, 2)
+        cards(4, 2) = cards(0, 2)
+        UIQuotePricingCards = cards
+        Exit Function
+    End If
+    cards(0, 1) = "$" & FormatNumber(result.SheetMaterialCost, 2)
+    cards(0, 2) = result.SheetCount & " sheets x " & FormatNumber(result.SheetWeight / result.SheetCount, 2) & _
+        " lb x $" & FormatNumber(result.PricePerPound, 2) & "/lb (parts only: $" & FormatNumber(result.TotalMaterialCost, 2) & ")"
+    cards(1, 1) = "$" & FormatNumber(result.LaborCost, 2)
+    cards(1, 2) = "Cut " & result.SheetCount & " sheets x $" & FormatNumber(result.CutRate, 2) & _
+        " + bend " & result.BentParts & " parts x $" & FormatNumber(result.BendRate, 2) & _
+        " + weld " & result.WeldedParts & " parts x $" & FormatNumber(result.WeldRate, 2)
+    If result.Painted Then
+        cards(2, 1) = "$" & FormatNumber(result.PaintCost, 2)
+        cards(2, 2) = FormatNumber(result.PaintArea, 2) & " ft^2 (both sides) x $" & FormatNumber(result.PaintRate, 2) & "/ft^2"
+    Else
+        cards(2, 1) = "Not painted"
+        cards(2, 2) = "Turn on Painted next to Material to include paint."
+    End If
+    cards(3, 1) = "$" & FormatNumber(result.TotalCost, 2)
+    cards(3, 2) = "Material + labor + paint"
+    cards(4, 1) = "$" & FormatNumber(result.Profit, 2)
+    cards(4, 2) = "Sell price = total cost / (1 - margin)"
+    UIQuotePricingCards = cards
+End Function
+
+Public Function UIQuotePricingReport(ByVal result As UIQuoteResult) As String
+    If Not result.HasPricing Then
+        UIQuotePricingReport = "PRICING: WITHHELD - needs valid quantities and a sheet layout." & vbCrLf
+        Exit Function
+    End If
+    UIQuotePricingReport = "PRICING (placeholder rates until time studies are available)" & vbCrLf & _
+        "Material, purchased sheets: " & result.SheetCount & " x 120 x 60 in = " & _
+        FormatNumber(result.SheetWeight, 2) & " lb x $" & FormatNumber(result.PricePerPound, 2) & "/lb = $" & _
+        FormatNumber(result.SheetMaterialCost, 2) & vbCrLf & _
+        "Labor - cutting: " & result.SheetCount & " sheets x $" & FormatNumber(result.CutRate, 2) & " = $" & FormatNumber(result.CutCost, 2) & vbCrLf & _
+        "Labor - bending: " & result.BentParts & " bent parts x $" & FormatNumber(result.BendRate, 2) & " = $" & FormatNumber(result.BendCost, 2) & _
+        IIf(result.BentParts = 0, " (no return - no bending)", "") & vbCrLf & _
+        "Labor - welding: " & result.WeldedParts & " parts x $" & FormatNumber(result.WeldRate, 2) & " = $" & FormatNumber(result.WeldCost, 2) & vbCrLf & _
+        "Labor total: $" & FormatNumber(result.LaborCost, 2) & vbCrLf & _
+        "Paint: " & IIf(result.Painted, FormatNumber(result.PaintArea, 2) & " ft^2 (both sides) x $" & _
+            FormatNumber(result.PaintRate, 2) & "/ft^2 = $" & FormatNumber(result.PaintCost, 2), "not painted") & vbCrLf & _
+        "TOTAL COST: $" & FormatNumber(result.TotalCost, 2) & vbCrLf & _
+        "Margin: " & FormatNumber(result.MarginPercent, 2) & "% of sell price; profit $" & FormatNumber(result.Profit, 2) & vbCrLf & _
+        "SELL PRICE: $" & FormatNumber(result.SellPrice, 2) & vbCrLf
 End Function
 
 Public Function UIQuoteParsePrice(ByVal text As String) As Double
@@ -236,13 +382,13 @@ Public Function UIQuoteReport(ByVal result As UIQuoteResult) As String
             "TOTAL PROFILE WEIGHT (lb): " & UIInchesText(result.TotalWeight) & vbCrLf & _
             "TOTAL PROFILE MATERIAL COST ($): " & FormatNumber(result.TotalMaterialCost, 2) & vbCrLf
     End If
-    UIQuoteReport = text & vbCrLf & _
+    UIQuoteReport = text & vbCrLf & UIQuotePricingReport(result) & vbCrLf & _
         "Profile areas use supplied rectangle/trapezoid rules; holes, cutouts and reliefs are NOT deducted." & vbCrLf & _
-        "Weight = profile area * thickness * density; material cost = weight * entered $/lb." & vbCrLf & _
-        "Costs exclude purchased-sheet offcuts, cutting, bending, welding, finishing, labor and margin." & vbCrLf & _
+        "Weight = profile area * thickness * density; part material cost = weight * entered $/lb." & vbCrLf & _
+        "Quoted material cost uses full purchased sheets, so offcuts and scrap are included." & vbCrLf & _
+        "Labor and paint use placeholder rates; finishing other than paint, freight and hardware are excluded." & vbCrLf & _
         "Verify against known designs. This is not a final manufacturing quote." & vbCrLf & _
-        "Purchased-sheet cost is NOT CALCULATED; see the sheet layout estimate below." & vbCrLf & _
-        "Next: Operations validation of spacing, margins, layout and cutout treatment." & vbCrLf & _
+        "Next: Operations validation of spacing, margins, layout, labor rates and cutout treatment." & vbCrLf & _
         UINestReport(result)
 End Function
 
@@ -250,7 +396,7 @@ End Function
 Public Function UIQuoteSummaryCards(ByVal result As UIQuoteResult) As Variant
     Dim cards(0 To 6, 0 To 1) As Variant
     Dim design As String
-    design = result.Material & "  |  " & IIf(result.Thickness = 0.25, "1/4", "3/16") & _
+    design = result.Material & IIf(result.Painted, " (painted)", "") & "  |  " & IIf(result.Thickness = 0.25, "1/4", "3/16") & _
         " in  |  $" & FormatNumber(result.PricePerPound, 2) & "/lb" & vbCrLf & _
         CStr(result.WallCount) & " walls  |  " & result.Orientation & "  |  " & result.ReturnLabel & vbCrLf & _
         "L x W x H: " & FormatNumber(result.OverallLength, 3) & " x " & _
@@ -264,6 +410,10 @@ Public Function UIQuoteSummaryCards(ByVal result As UIQuoteResult) As Variant
     If result.HasValidTotals Then
         cards(0, 0) = "PROFILE MATERIAL ESTIMATE"
         cards(0, 1) = "$" & FormatNumber(result.TotalMaterialCost, 2)
+        If result.HasPricing Then
+            cards(0, 0) = "QUOTE SELL PRICE  (" & FormatNumber(result.MarginPercent, 2) & "% margin)"
+            cards(0, 1) = "$" & FormatNumber(result.SellPrice, 2)
+        End If
         cards(1, 1) = design
         cards(2, 1) = FormatNumber(result.TotalWeight, 2) & " lb"
         cards(3, 1) = FormatNumber(result.TotalArea / 144, 2) & " ft^2"

@@ -20,7 +20,7 @@ class SheetUsageTests(unittest.TestCase):
         self.assertIn("Me.ScrollBars = fmScrollBarsNone", form)
         self.assertNotIn("Me.ScrollHeight", form)
         self.assertNotIn("Me.ScrollTop", form)
-        self.assertIn("Me.Height = 570", form)
+        self.assertIn("Me.Height = 622", form)
         self.assertNotIn("optimizeButton", form)
 
     @unittest.skipUnless(shutil.which("cscript"), "Windows Script Host required")
@@ -46,6 +46,9 @@ class SheetUsageTests(unittest.TestCase):
         script += r'''
 Function UIInchesText(value)
     UIInchesText = CStr(value)
+End Function
+Function UINestMarginText(result)
+    UINestMarginText = CStr(result.EdgeMargin) & " in"
 End Function
 Function PDFFormat(value, pattern)
     PDFFormat = FormatNumber(value, 2, -1, 0, 0)
@@ -77,6 +80,8 @@ q.Material = "Mild Steel"
 q.Thickness = 0.25
 q.PartGap = 0.25
 q.EdgeMargin = 0.25
+q.EdgeMarginLength = 0.25
+q.EdgeMarginWidth = 0.25
 q.WallCount = 4
 q.Orientation = "N/A"
 q.ReturnLabel = "No return"

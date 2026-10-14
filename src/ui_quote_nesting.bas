@@ -27,6 +27,9 @@ Public Sub UINestQuote(ByVal result As UIQuoteResult, ByVal gap As Double, ByVal
     Dim bestPlacements As Variant
     Dim elimPlacements As Variant
     Dim eliminatedAny As Boolean
+    Dim marginLength As Double
+    Dim marginWidth As Double
+    Dim relaxedParts As String
 
     If gap < 0 Or margin < 0 Or margin >= 30 Then
         Err.Raise vbObjectError + 2450, "UINestQuote", "Spacing must be nonnegative and sheet-edge margin must be less than 30 inches."
@@ -39,6 +42,9 @@ Public Sub UINestQuote(ByVal result As UIQuoteResult, ByVal gap As Double, ByVal
     result.SheetPlacements = Empty
     result.PartGap = gap
     result.EdgeMargin = margin
+    result.EdgeMarginLength = margin
+    result.EdgeMarginWidth = margin
+    result.NestWarning = ""
     result.NestMethod = ""
     result.NestTrialCount = 0
     result.NestBaselineSheets = 0
@@ -65,8 +71,8 @@ Public Sub UINestQuote(ByVal result As UIQuoteResult, ByVal gap As Double, ByVal
         result.NestStatus = "Sheet estimate unavailable: supported quote size is 1 to 2000 physical components."
         Exit Sub
     End If
-    usableLength = 120 - 2 * margin
-    usableWidth = 60 - 2 * margin
+    marginLength = margin
+    marginWidth = margin
     If totalGussets > 0 Then
         ReDim gussets(0 To totalGussets - 1)
         j = 0
@@ -84,12 +90,43 @@ Public Sub UINestQuote(ByVal result As UIQuoteResult, ByVal gap As Double, ByVal
                 Next mode
             End If
         Next i
-        If Not ((result.GussetBottomWidth <= usableLength And result.GussetHeight <= usableWidth) Or _
-                (result.GussetHeight <= usableLength And result.GussetBottomWidth <= usableWidth)) Then
+        If Not UINestRelaxMargin(gussets(0), result.GussetBottomWidth, result.GussetHeight, margin, _
+                                 marginLength, marginWidth, relaxedParts) Then
             result.NestStatus = "Sheet estimate unavailable: " & gussets(0) & _
-                " does not fit the 120 x 60 sheet with the selected margins."
+                " does not fit the 120 x 60 sheet even with no edge margin."
             Exit Sub
         End If
+    End If
+
+    For i = 0 To UBound(result.Components)
+        Set part = result.Components(i)
+        If part.TopWidth = 0 And part.Quantity > 0 Then
+            If Not UINestRelaxMargin(part.Name, part.Length, part.Width, margin, _
+                                     marginLength, marginWidth, relaxedParts) Then
+                result.NestStatus = "Sheet estimate unavailable: " & part.Name & _
+                    " does not fit the 120 x 60 sheet even with no edge margin."
+                Exit Sub
+            End If
+        End If
+    Next i
+
+    ' Parts that only fit full-length/full-width use the sheet edge on that axis only.
+    result.EdgeMarginLength = marginLength
+    result.EdgeMarginWidth = marginWidth
+    If marginLength < margin Or marginWidth < margin Then
+        result.NestWarning = "Edge margin reduced so " & relaxedParts & " fit: "
+        If marginLength < margin Then
+            result.NestWarning = result.NestWarning & UIInchesText(marginLength) & " in at the sheet ends"
+            If marginWidth < margin Then result.NestWarning = result.NestWarning & ", "
+        End If
+        If marginWidth < margin Then
+            result.NestWarning = result.NestWarning & UIInchesText(marginWidth) & " in along the sheet sides"
+        End If
+        result.NestWarning = result.NestWarning & " (requested " & UIInchesText(margin) & " in). Confirm with Operations."
+    End If
+    usableLength = 120 - 2 * marginLength
+    usableWidth = 60 - 2 * marginWidth
+    If totalGussets > 0 Then
         pairShift = gap * Sqr(1 + ((result.GussetBottomWidth - result.GussetTopWidth) / result.GussetHeight) ^ 2)
         pairWidth = result.GussetBottomWidth + result.GussetTopWidth + pairShift
         pairFits = ((pairWidth <= usableLength And result.GussetHeight <= usableWidth) Or _
@@ -97,18 +134,6 @@ Public Sub UINestQuote(ByVal result As UIQuoteResult, ByVal gap As Double, ByVal
     Else
         pairFits = False
     End If
-
-    For i = 0 To UBound(result.Components)
-        Set part = result.Components(i)
-        If part.TopWidth = 0 And part.Quantity > 0 Then
-            If Not ((part.Length <= usableLength And part.Width <= usableWidth) Or _
-                    (part.Width <= usableLength And part.Length <= usableWidth)) Then
-                result.NestStatus = "Sheet estimate unavailable: " & part.Name & _
-                    " does not fit the 120 x 60 sheet with the selected margins."
-                Exit Sub
-            End If
-        End If
-    Next i
 
     best = nonGussetCount + totalGussets + 1
     pairedItems = UINestBuildItems(result, 0, pairFits, pairWidth, gussets, nonGussetCount, totalGussets)
@@ -124,7 +149,7 @@ Public Sub UINestQuote(ByVal result As UIQuoteResult, ByVal gap As Double, ByVal
         End If
         If mode < 4 Or packMode >= 2 Or sortOrder >= 2 Then
             UINestSort pairedItems, sortOrder
-            trial = UINestPack(pairedItems, usableLength, usableWidth, gap, margin, packMode, sheets)
+            trial = UINestPack(pairedItems, usableLength, usableWidth, gap, 0, packMode, sheets)
             If sheets < best Then
                 best = sheets
                 bestPlacements = trial
@@ -135,7 +160,7 @@ Public Sub UINestQuote(ByVal result As UIQuoteResult, ByVal gap As Double, ByVal
 
     For mode = 0 To 7
         UINestSort pairedItems, mode Mod 4
-        trial = UINestMaxRects(pairedItems, usableLength, usableWidth, gap, margin, mode \ 4, sheets)
+        trial = UINestMaxRects(pairedItems, usableLength, usableWidth, gap, 0, mode \ 4, sheets)
         If sheets < best Then
             best = sheets
             bestPlacements = trial
@@ -153,7 +178,7 @@ Public Sub UINestQuote(ByVal result As UIQuoteResult, ByVal gap As Double, ByVal
         singleItems = UINestBuildItems(result, 1, pairFits, pairWidth, gussets, nonGussetCount, totalGussets)
         For mode = 0 To 7
             UINestSort singleItems, mode Mod 4
-            trial = UINestMaxRects(singleItems, usableLength, usableWidth, gap, margin, mode \ 4, sheets)
+            trial = UINestMaxRects(singleItems, usableLength, usableWidth, gap, 0, mode \ 4, sheets)
             If sheets < best Then
                 best = sheets
                 bestPlacements = trial
@@ -164,7 +189,7 @@ Public Sub UINestQuote(ByVal result As UIQuoteResult, ByVal gap As Double, ByVal
         mixedItems = UINestBuildItems(result, 2, pairFits, pairWidth, gussets, nonGussetCount, totalGussets)
         For mode = 0 To 7
             UINestSort mixedItems, mode Mod 4
-            trial = UINestMaxRects(mixedItems, usableLength, usableWidth, gap, margin, mode \ 4, sheets)
+            trial = UINestMaxRects(mixedItems, usableLength, usableWidth, gap, 0, mode \ 4, sheets)
             If sheets < best Then
                 best = sheets
                 bestPlacements = trial
@@ -179,7 +204,7 @@ Public Sub UINestQuote(ByVal result As UIQuoteResult, ByVal gap As Double, ByVal
     Do While best > 1
         If best <= areaMinSheets Then Exit Do
         If result.TotalArea > (best - 1) * usableLength * usableWidth Then Exit Do
-        If UINestEliminateSheet(bestPlacements, best, usableLength, usableWidth, gap, margin, elimPlacements) Then
+        If UINestEliminateSheet(bestPlacements, best, usableLength, usableWidth, gap, 0, elimPlacements) Then
             best = best - 1
             bestPlacements = elimPlacements
             eliminatedAny = True
@@ -191,6 +216,10 @@ Public Sub UINestQuote(ByVal result As UIQuoteResult, ByVal gap As Double, ByVal
         bestMethod = bestMethod & " + sheet elimination"
     End If
 
+    For i = 0 To UBound(bestPlacements)
+        bestPlacements(i, 2) = bestPlacements(i, 2) + marginLength
+        bestPlacements(i, 3) = bestPlacements(i, 3) + marginWidth
+    Next i
     result.SheetCount = best
     result.SheetPlacements = bestPlacements
     result.NestMethod = bestMethod
@@ -206,6 +235,66 @@ Public Sub UINestQuote(ByVal result As UIQuoteResult, ByVal gap As Double, ByVal
         result.NestStatus = result.NestStatus & " Area lower bound reached; remaining trials skipped as they cannot use fewer sheets."
     End If
 End Sub
+
+' Returns False when the part cannot fit even with no margin; otherwise lowers the
+' length/width margins only as far as needed, keeping the orientation that keeps the most margin.
+Private Function UINestRelaxMargin(ByVal partName As String, ByVal partLength As Double, _
+    ByVal partWidth As Double, ByVal margin As Double, ByRef marginLength As Double, _
+    ByRef marginWidth As Double, ByRef relaxedParts As String) As Boolean
+    Dim capLengthA As Double
+    Dim capWidthA As Double
+    Dim capLengthB As Double
+    Dim capWidthB As Double
+    Dim keepA As Double
+    Dim keepB As Double
+    Dim capLength As Double
+    Dim capWidth As Double
+    capLengthA = (120 - partLength) / 2
+    capWidthA = (60 - partWidth) / 2
+    capLengthB = (120 - partWidth) / 2
+    capWidthB = (60 - partLength) / 2
+    UINestRelaxMargin = True
+    If (capLengthA >= margin And capWidthA >= margin) Or (capLengthB >= margin And capWidthB >= margin) Then Exit Function
+    keepA = -1
+    keepB = -1
+    If capLengthA >= -0.000001 And capWidthA >= -0.000001 Then
+        keepA = UINestMax(0, capLengthA) + UINestMax(0, capWidthA)
+        If capLengthA > margin Then keepA = keepA - capLengthA + margin
+        If capWidthA > margin Then keepA = keepA - capWidthA + margin
+    End If
+    If capLengthB >= -0.000001 And capWidthB >= -0.000001 Then
+        keepB = UINestMax(0, capLengthB) + UINestMax(0, capWidthB)
+        If capLengthB > margin Then keepB = keepB - capLengthB + margin
+        If capWidthB > margin Then keepB = keepB - capWidthB + margin
+    End If
+    If keepA < 0 And keepB < 0 Then
+        UINestRelaxMargin = False
+        Exit Function
+    End If
+    If keepA >= keepB Then
+        capLength = UINestMax(0, capLengthA)
+        capWidth = UINestMax(0, capWidthA)
+    Else
+        capLength = UINestMax(0, capLengthB)
+        capWidth = UINestMax(0, capWidthB)
+    End If
+    If capLength < marginLength Then marginLength = capLength
+    If capWidth < marginWidth Then marginWidth = capWidth
+    If InStr(1, ", " & relaxedParts & ", ", ", " & partName & ", ") = 0 Then
+        If Len(relaxedParts) > 0 Then relaxedParts = relaxedParts & ", "
+        relaxedParts = relaxedParts & partName
+    End If
+End Function
+
+Public Function UINestMarginText(ByVal result As UIQuoteResult) As String
+    If Abs(result.EdgeMarginLength - result.EdgeMargin) < 0.000001 And _
+       Abs(result.EdgeMarginWidth - result.EdgeMargin) < 0.000001 Then
+        UINestMarginText = UIInchesText(result.EdgeMargin) & " in"
+    Else
+        UINestMarginText = UIInchesText(result.EdgeMarginLength) & " in ends / " & _
+            UIInchesText(result.EdgeMarginWidth) & " in sides"
+    End If
+End Function
 
 Private Function UINestBuildItems(ByVal result As UIQuoteResult, ByVal pairPolicy As Long, _
     ByVal pairFits As Boolean, ByVal pairWidth As Double, ByRef gussets() As String, _
@@ -478,8 +567,8 @@ Private Function UINestEliminateSheet(ByVal placements As Variant, ByVal sheetCo
     For i = 0 To UBound(newPlacements)
         If newPlacements(i, 0) < 1 Or newPlacements(i, 0) > sheetCount - 1 Then Exit Function
         If newPlacements(i, 2) < margin - 0.000001 Or newPlacements(i, 3) < margin - 0.000001 Then Exit Function
-        If newPlacements(i, 2) + newPlacements(i, 4) > 120 - margin + 0.000001 Then Exit Function
-        If newPlacements(i, 3) + newPlacements(i, 5) > 60 - margin + 0.000001 Then Exit Function
+        If newPlacements(i, 2) + newPlacements(i, 4) > margin + sheetLength + 0.000001 Then Exit Function
+        If newPlacements(i, 3) + newPlacements(i, 5) > margin + sheetWidth + 0.000001 Then Exit Function
         If newPlacements(i, 6) <> 0 And newPlacements(i, 6) <> 90 Then Exit Function
         For j = i + 1 To UBound(newPlacements)
             If newPlacements(i, 0) = newPlacements(j, 0) Then
@@ -803,12 +892,13 @@ Public Function UINestReport(ByVal result As UIQuoteResult) As String
     Dim area As Double
     Dim quantity As Long
     text = vbCrLf & "SHEET LAYOUT ESTIMATE - 120 x 60 in" & vbCrLf & result.NestStatus & vbCrLf & _
-        "Part spacing: " & UIInchesText(result.PartGap) & " in; edge margin: " & UIInchesText(result.EdgeMargin) & " in." & vbCrLf & _
+        "Part spacing: " & UIInchesText(result.PartGap) & " in; edge margin: " & UINestMarginText(result) & "." & vbCrLf & _
         "Provisional 0.25-inch defaults are estimating assumptions, NOT a mandatory laser standard." & vbCrLf
     If Not result.NestAvailable Then
         UINestReport = text
         Exit Function
     End If
+    If Len(result.NestWarning) > 0 Then text = text & "WARNING: " & result.NestWarning & vbCrLf
     text = text & "Estimated sheets: " & result.SheetCount & "; area-only lower bound: " & result.AreaMinimumSheets & vbCrLf & _
         "Profile utilization: " & FormatNumber(result.UtilizationPercent, 2) & "%; unused/scrap: " & FormatNumber(result.UnusedPercent, 2) & "%" & vbCrLf & _
         "Unused area includes reusable remnants, margins, gaps and shape offcuts; not necessarily discarded scrap." & vbCrLf & _

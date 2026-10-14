@@ -200,14 +200,15 @@ The component report implements [Component_Quote_Formulas.txt](../Component_Quot
 
 Holes, notches and reliefs are **not deducted**: the supplied rectangular/
 trapezoidal profiles are explicitly labeled. The sheet estimator below uses
-120 x 60-inch stock. Purchased-sheet costs remain **NOT CALCULATED**; profile
-costs above do not include offcuts.
+120 x 60-inch stock. Profile (part) material costs above do not include
+offcuts; the quote pricing below charges full purchased sheets.
 The local workbook and `equations.txt` export remain Git-ignored.
 
 #### Profile weight and material pricing
 
 The quote-only **Quote material ($/lb)** input defaults to **0.70**, can be
-changed for each run, and is disabled/ignored for preview and full model runs.
+changed for each run under **Properties...**, and is ignored for preview and
+full model runs.
 It accepts positive dot-decimal numbers, without currency symbols, commas,
 fractions or units. Zero/negative/missing prices produce explicit errors.
 The API also validates positive prices; its optional default is 0.70.
@@ -240,11 +241,40 @@ Updating an existing installation: replace `UserForm_AutomationUI`,
 `ui_quote_calculator`, `UIQuoteResult` and `UIQuoteComponent`, then compile
 and save.
 
+#### Labor, paint, margin and sell price
+
+Quote settings are grouped under the **Properties...** button on the input
+form (an overlay panel with **Restore Defaults** and **Done**). They are used
+only by Quote only:
+
+| Property | Default | Applies to |
+|---|---|---|
+| Quote material ($/lb) | 0.70 | Full purchased sheets: sheets x 120 x 60 x T x density |
+| Cutting labor ($/sheet) | 75.00 | Every purchased sheet |
+| Bending labor ($/bent part) | 5.00 | Center/side planter walls and left/right side walls, only when a return is selected |
+| Welding labor ($/part) | 8.00 | Every physical part (all parts are welded) |
+| Paint ($/sq ft, both sides) | 2.50 | 2 x total profile area, only when **Painted** is on |
+| Default margin (%) | 30.00 | Gross margin, 0-95% |
+| Quote part gap / edge margin (in) | 0.25 / 0.25 | Sheet nesting |
+
+Labor and paint defaults are placeholders until time studies are available.
+The **Painted / Not painted** toggle sits next to Material.
+
+Total cost = purchased-sheet material + labor + paint. Sell price uses gross
+margin: `sell = total cost / (1 - margin)`, so a 30% margin means profit is
+30% of the sell price. Pricing is withheld when quantities disagree or no
+sheet layout is available.
+
+The results page leads with the sell price and shows a pricing row (material,
+labor, paint, total cost, margin). The margin box and spinner recalculate the
+sell price and profit immediately; hover any pricing tile for its breakdown.
+Technical Details includes the full pricing calculation.
+
 #### Sheet nesting estimate and Operations verification
 
 Quote-only now includes editable **Quote part gap (in)** and **Quote edge
-margin (in)** inputs, both defaulting to **0.25**. They are disabled/ignored
-for model and preview runs. Margins apply at all four sheet edges. Rotation
+margin (in)** inputs under **Properties...**, both defaulting to **0.25**.
+They are ignored for model and preview runs. Margins apply at all four sheet edges. Rotation
 by 90 degrees is allowed, as approved by the user. The current quote contains
 one material/thickness; sheets are not shared between separate quotes.
 
@@ -326,8 +356,13 @@ the current combined heuristic estimates **7 sheets**, **72.6934% utilization** 
 
 Count mismatches, oversized bundles or quotes exceeding 2000 physical parts
 produce an explicit unavailable status rather than a misleading sheet count.
-Bad/negative settings raise actionable input errors. A 120-inch blank will
-not fit when any positive edge margin is reserved; do not silently trim it.
+Bad/negative settings raise actionable input errors. A blank longer than the
+usable length (for example a 120-inch wall with a 0.25-inch margin) is placed
+by reducing the edge margin on that axis only, just as far as needed; the
+other axis keeps the requested margin. The reduction is never silent: it is
+shown in orange under the results sheet table, in Technical Details and on the
+PDF summary page, and sheet pages show the effective ends/sides margins.
+Parts larger than 120 x 60 even with no margin remain unavailable.
 Adjustments require Operations approval. The supported margin is <30 inches.
 Zero clearance is supported for exploration, not recommended as production
 approval or implicit common-line cutting.

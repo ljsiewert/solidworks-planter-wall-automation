@@ -8,6 +8,10 @@ Private WithEvents browseButton As MSForms.CommandButton
 Private WithEvents wallsBox As MSForms.ComboBox
 Private WithEvents quoteBox As MSForms.CheckBox
 Private WithEvents previewBox As MSForms.CheckBox
+Private WithEvents propertiesButton As MSForms.CommandButton
+Private WithEvents propertiesDoneButton As MSForms.CommandButton
+Private WithEvents propertiesResetButton As MSForms.CommandButton
+Private WithEvents paintedToggle As MSForms.ToggleButton
 
 Private sideBox As MSForms.ComboBox
 Private returnBox As MSForms.ComboBox
@@ -19,6 +23,12 @@ Private heightBox As MSForms.TextBox
 Private priceBox As MSForms.TextBox
 Private gapBox As MSForms.TextBox
 Private marginBox As MSForms.TextBox
+Private cutRateBox As MSForms.TextBox
+Private bendRateBox As MSForms.TextBox
+Private weldRateBox As MSForms.TextBox
+Private paintRateBox As MSForms.TextBox
+Private quoteMarginBox As MSForms.TextBox
+Private propertiesFrame As MSForms.Frame
 Private folderBox As MSForms.TextBox
 Private pdfAssembliesBox As MSForms.CheckBox
 Private pdfComponentsBox As MSForms.CheckBox
@@ -36,7 +46,7 @@ Private Sub UserForm_Initialize()
 
     Me.Caption = "Planter Wall Automation"
     Me.Width = 470
-    Me.Height = 605
+    Me.Height = 515
     acceptedValue = False
 
     Set wallsBox = AddCombo("cboWallCount", "Wall count", 16, Array("1", "2", "3", "4"))
@@ -47,36 +57,44 @@ Private Sub UserForm_Initialize()
     Set widthBox = AddText("txtOverallWidth", "Overall width (in)", 136, "")
     Set heightBox = AddText("txtOverallHeight", "Overall height (in)", 166, "")
     Set materialBox = AddCombo("cboMaterial", "Material", 196, Array("Mild Steel", "Borcon Weathering Steel"))
+    materialBox.Width = 178
+    Set paintedToggle = Me.Controls.Add("Forms.ToggleButton.1", "tglPainted", True)
+    With paintedToggle
+        .Left = 358
+        .Top = 196
+        .Width = 80
+        .Height = 22
+        .Value = False
+        .ControlTipText = "Include paint (both sides of every part) in the quote."
+    End With
+    paintedToggle_Click
     Set thicknessBox = AddCombo("cboThickness", "Material thickness", 226, Array("3/16 inch", "1/4 inch"))
-    Set priceBox = AddText("txtPricePerPound", "Quote material ($/lb)", 256, "0.70")
-    priceBox.Enabled = False
-    Set gapBox = AddText("txtPartGap", "Quote part gap (in)", 286, "0.25")
-    Set marginBox = AddText("txtEdgeMargin", "Quote edge margin (in)", 316, "0.25")
-    gapBox.Enabled = False
-    marginBox.Enabled = False
-    Set folderBox = AddText("txtOutputFolder", "Output parent folder", 346, packngo1.packTestFolder)
+    Set folderBox = AddText("txtOutputFolder", "Output parent folder", 256, packngo1.packTestFolder)
     folderBox.Width = 220
-    Set browseButton = AddButton("cmdBrowse", "...", 403, 346, 35)
+    Set browseButton = AddButton("cmdBrowse", "...", 403, 256, 35)
 
-    Set previewBox = AddCheck("chkPreviewOnly", "Preview only (no files created)", 16, 378)
-    Set quoteBox = AddCheck("chkQuoteOnly", "Quote only (input-only material estimate)", 16, 408)
-    Set pdfAssembliesBox = AddCheck("chkPDFAssemblies", "PDF assemblies", 16, 440)
-    Set pdfComponentsBox = AddCheck("chkPDFComponents", "PDF components", 235, 440)
-    Set dxfBox = AddCheck("chkDXF", "DXF files", 16, 466)
-    Set stepBox = AddCheck("chkSTEP", "STEP files", 235, 466)
+    Set previewBox = AddCheck("chkPreviewOnly", "Preview only (no files created)", 16, 288)
+    Set quoteBox = AddCheck("chkQuoteOnly", "Quote only (input-only material estimate)", 16, 318)
+    Set pdfAssembliesBox = AddCheck("chkPDFAssemblies", "PDF assemblies", 16, 350)
+    Set pdfComponentsBox = AddCheck("chkPDFComponents", "PDF components", 235, 350)
+    Set dxfBox = AddCheck("chkDXF", "DXF files", 16, 376)
+    Set stepBox = AddCheck("chkSTEP", "STEP files", 235, 376)
 
     Set note = Me.Controls.Add("Forms.Label.1", "lblNotes", True)
-    note.Caption = "Quote gap/margin defaults are provisional; verify with Operations." & vbCrLf & _
+    note.Caption = "Quote rates, gap and margins are under Properties; defaults are provisional." & vbCrLf & _
                    "Sheet layouts are estimates, not laser-ready cutting programs."
     note.Left = 16
-    note.Top = 498
+    note.Top = 408
     note.Width = 425
     note.Height = 32
 
-    Set runButton = AddButton("cmdRun", "Run", 250, 538, 90)
+    Set propertiesButton = AddButton("cmdProperties", "Properties...", 16, 448, 100)
+    propertiesButton.ControlTipText = "Quote material price, labor and paint rates, margin, part gap and edge margin"
+    Set runButton = AddButton("cmdRun", "Run", 250, 448, 90)
     runButton.Default = True
-    Set cancelButton = AddButton("cmdCancel", "Cancel", 348, 538, 90)
+    Set cancelButton = AddButton("cmdCancel", "Cancel", 348, 448, 90)
     cancelButton.Cancel = True
+    BuildProperties
 
     wallsBox.ListIndex = 0
     returnBox.ListIndex = 0
@@ -101,6 +119,125 @@ Private Sub UserForm_Initialize()
     Select Case packngo1.thicknessLabel
         Case "1", "2": thicknessBox.ListIndex = CLng(packngo1.thicknessLabel) - 1
     End Select
+End Sub
+
+' Properties panel: an overlay frame so quote settings stay adjustable without cluttering the form.
+Private Sub BuildProperties()
+    Dim heading As MSForms.Label
+    Set propertiesFrame = Me.Controls.Add("Forms.Frame.1", "fraProperties", True)
+    With propertiesFrame
+        .Caption = "Quote Properties"
+        .Left = 6
+        .Top = 6
+        .Width = Me.InsideWidth - 12
+        .Height = Me.InsideHeight - 12
+        .Visible = False
+    End With
+    Set heading = propertiesFrame.Controls.Add("Forms.Label.1", "lblPropertiesNote", True)
+    heading.Caption = "Used by Quote only. Labor and paint rates are placeholders until time studies are done."
+    heading.Left = 10
+    heading.Top = 8
+    heading.Width = 420
+    heading.Height = 28
+    Set priceBox = AddPropertyText("txtPricePerPound", "Quote material ($/lb)", 40, "0.70")
+    Set cutRateBox = AddPropertyText("txtCutRate", "Cutting labor ($/sheet)", 70, FormatRate(UIQuoteDefaultRate("Cut")))
+    Set bendRateBox = AddPropertyText("txtBendRate", "Bending labor ($/bent part)", 100, FormatRate(UIQuoteDefaultRate("Bend")))
+    Set weldRateBox = AddPropertyText("txtWeldRate", "Welding labor ($/part)", 130, FormatRate(UIQuoteDefaultRate("Weld")))
+    Set paintRateBox = AddPropertyText("txtPaintRate", "Paint ($/sq ft, both sides)", 160, FormatRate(UIQuoteDefaultRate("Paint")))
+    Set quoteMarginBox = AddPropertyText("txtQuoteMargin", "Default margin (%)", 190, FormatRate(UIQuoteDefaultRate("Margin")))
+    Set gapBox = AddPropertyText("txtPartGap", "Quote part gap (in)", 220, "0.25")
+    Set marginBox = AddPropertyText("txtEdgeMargin", "Quote edge margin (in)", 250, "0.25")
+    Set heading = propertiesFrame.Controls.Add("Forms.Label.1", "lblPropertiesHelp", True)
+    heading.Caption = "Bending applies only when a return is selected (wall and side wall parts). " & _
+        "Welding is charged for every part. Margin can also be changed on the results page."
+    heading.Left = 10
+    heading.Top = 282
+    heading.Width = 420
+    heading.Height = 40
+    heading.ForeColor = RGB(89, 89, 89)
+    Set propertiesResetButton = propertiesFrame.Controls.Add("Forms.CommandButton.1", "cmdResetProperties", True)
+    With propertiesResetButton
+        .Caption = "Restore Defaults"
+        .Left = 10
+        .Top = propertiesFrame.InsideHeight - 34
+        .Width = 120
+        .Height = 24
+    End With
+    Set propertiesDoneButton = propertiesFrame.Controls.Add("Forms.CommandButton.1", "cmdPropertiesDone", True)
+    With propertiesDoneButton
+        .Caption = "Done"
+        .Left = propertiesFrame.InsideWidth - 100
+        .Top = propertiesFrame.InsideHeight - 34
+        .Width = 90
+        .Height = 24
+    End With
+End Sub
+
+Private Function AddPropertyText(ByVal name As String, ByVal caption As String, _
+                                 ByVal top As Single, ByVal text As String) As MSForms.TextBox
+    Dim label As MSForms.Label
+    Dim box As MSForms.TextBox
+    Set label = propertiesFrame.Controls.Add("Forms.Label.1", name & "Label", True)
+    label.Caption = caption
+    label.Left = 10
+    label.Top = top + 3
+    label.Width = 170
+    label.Height = 19
+    Set box = propertiesFrame.Controls.Add("Forms.TextBox.1", name, True)
+    box.Left = 190
+    box.Top = top
+    box.Width = 120
+    box.Height = 22
+    box.Text = text
+    Set AddPropertyText = box
+End Function
+
+Private Function FormatRate(ByVal value As Double) As String
+    FormatRate = Format$(value, "0.00")
+End Function
+
+Private Sub ShowProperties(ByVal showPanel As Boolean)
+    Dim item As Object
+    For Each item In Me.Controls
+        If item.Parent Is Me Then
+            If Not item Is propertiesFrame Then item.Visible = Not showPanel
+        End If
+    Next item
+    propertiesFrame.Visible = showPanel
+    runButton.Default = Not showPanel
+    cancelButton.Cancel = Not showPanel
+End Sub
+
+Private Sub propertiesButton_Click()
+    ShowProperties True
+End Sub
+
+' Values are validated when a quote runs; Done just closes the panel.
+Private Sub propertiesDoneButton_Click()
+    ShowProperties False
+End Sub
+
+Private Sub propertiesResetButton_Click()
+    priceBox.Text = "0.70"
+    cutRateBox.Text = FormatRate(UIQuoteDefaultRate("Cut"))
+    bendRateBox.Text = FormatRate(UIQuoteDefaultRate("Bend"))
+    weldRateBox.Text = FormatRate(UIQuoteDefaultRate("Weld"))
+    paintRateBox.Text = FormatRate(UIQuoteDefaultRate("Paint"))
+    quoteMarginBox.Text = FormatRate(UIQuoteDefaultRate("Margin"))
+    gapBox.Text = "0.25"
+    marginBox.Text = "0.25"
+End Sub
+
+Private Sub paintedToggle_Click()
+    If paintedToggle.Value Then
+        paintedToggle.Caption = "Painted"
+        paintedToggle.ForeColor = RGB(31, 73, 125)
+        paintedToggle.Font.Bold = True
+    Else
+        paintedToggle.Caption = "Not painted"
+        paintedToggle.ForeColor = RGB(89, 89, 89)
+        paintedToggle.Font.Bold = False
+    End If
 End Sub
 
 Private Function AddCombo(ByVal name As String, ByVal caption As String, _
@@ -200,9 +337,6 @@ Private Sub quoteBox_Click()
     previewBox.Enabled = Not quoteBox.Value
     folderBox.Enabled = Not quoteBox.Value And Not previewBox.Value
     browseButton.Enabled = Not quoteBox.Value And Not previewBox.Value
-    priceBox.Enabled = CBool(quoteBox.Value)
-    gapBox.Enabled = CBool(quoteBox.Value)
-    marginBox.Enabled = CBool(quoteBox.Value)
 End Sub
 
 Private Sub previewBox_Click()
@@ -243,6 +377,7 @@ Private Sub runButton_Click()
     Dim pricePerPound As Double
     Dim partGap As Double
     Dim edgeMargin As Double
+    Dim quoteMargin As Double
 
     On Error GoTo InvalidInput
     If wallsBox.ListIndex < 0 Then
@@ -261,12 +396,18 @@ Private Sub runButton_Click()
     previewOnly = CBool(previewBox.Value)
     Set quoteValues = Nothing
     If quoteOnly Then
-        priceBox.SetFocus
+        On Error GoTo InvalidProperty
         pricePerPound = UIQuoteParsePrice(priceBox.Text)
         partGap = ReadClearance(gapBox, "Part gap")
         edgeMargin = ReadClearance(marginBox, "Sheet edge margin")
+        quoteMargin = UIQuoteParseRate(quoteMarginBox.Text, "Default margin")
+        If quoteMargin > 95 Then Err.Raise vbObjectError + 2100, , "Default margin must be between 0% and 95%."
         Set quoteValues = UICalculateQuote(CLng(wallsBox.Value), CStr(sideBox.Value), _
             CStr(returnBox.Value), CStr(materialBox.Value), CStr(thicknessBox.Value), length, width, height, pricePerPound, partGap, edgeMargin)
+        UIQuotePricing quoteValues, CBool(paintedToggle.Value), UIQuoteParseRate(cutRateBox.Text, "Cutting labor"), _
+            UIQuoteParseRate(bendRateBox.Text, "Bending labor"), UIQuoteParseRate(weldRateBox.Text, "Welding labor"), _
+            UIQuoteParseRate(paintRateBox.Text, "Paint rate"), quoteMargin
+        On Error GoTo InvalidInput
         exportPDFAssemblies = False
         exportPDFComponents = False
         exportDXF = False
@@ -303,6 +444,11 @@ Private Sub runButton_Click()
     Exit Sub
 InvalidInput:
     MsgBox Err.Description, vbExclamation, "Review Form Inputs"
+    Exit Sub
+InvalidProperty:
+    Set quoteValues = Nothing
+    ShowProperties True
+    MsgBox Err.Description & vbCrLf & "Open Properties to correct the quote settings.", vbExclamation, "Review Quote Properties"
 End Sub
 
 Private Function ReadClearance(ByVal box As MSForms.TextBox, ByVal label As String) As Double
@@ -318,7 +464,7 @@ Private Function ReadDimension(ByVal box As MSForms.TextBox, ByVal label As Stri
     ReadDimension = UIParseInches(box.Text)
     Exit Function
 InvalidInput:
-    box.SetFocus
+    If Not box.Parent Is propertiesFrame Then box.SetFocus
     Err.Raise vbObjectError + 2100, "ReadDimension", label & ": " & Err.Description
 End Function
 

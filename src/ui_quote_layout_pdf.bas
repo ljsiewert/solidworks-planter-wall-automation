@@ -118,9 +118,12 @@ Private Function UIPDFSummary(ByVal result As UIQuoteResult) As String
     text = text & UIPDFFact(294, "32-trial baseline", result.NestBaselineSheets & " sheets")
     text = text & UIPDFFact(274, "Area-only minimum", result.AreaMinimumSheets & " sheets (lower bound)")
     text = text & UIPDFFact(254, "Physical parts", CStr(totalParts))
-    text = text & UIPDFFact(234, "Part gap / edge margin", UIInchesText(result.PartGap) & " in / " & UIInchesText(result.EdgeMargin) & " in")
+    text = text & UIPDFFact(234, "Part gap / edge margin", UIInchesText(result.PartGap) & " in / " & UINestMarginText(result))
     text = text & UIPDFFact(214, "Rotated placements", CStr(rotated))
     text = text & UIPDFStyledText(410, 192, 8.5, "Area-only minimum ignores fit, gaps and margins; not a feasible layout.", False, gray)
+    If Len(result.NestWarning) > 0 Then
+        text = text & UIPDFStyledText(36, 175, 8.5, "NOTE: " & result.NestWarning, True, "0.749 0.341 0")
+    End If
     text = text & UIPDFRect(36, 74, 720, 96, "1 0.969 0.89")
     text = text & UIPDFRect(36, 74, 4, 96, "0.749 0.341 0")
     text = text & UIPDFStyledText(50, 152, 11, "Keep in mind", True, "0.6 0.27 0")
@@ -263,11 +266,11 @@ Private Function UIPDFSheet(ByVal result As UIQuoteResult, ByVal sheet As Long) 
     Dim gusset As Boolean
     text = UIPDFText(36, 576, 18, "Estimated Sheet Layout - Sheet " & sheet & " of " & result.SheetCount)
     text = text & UIPDFText(36, 556, 10, result.Material & " | Thickness: " & UIInchesText(result.Thickness) & _
-        " in | Stock: 120 x 60 in | Gap: " & UIInchesText(result.PartGap) & " in | Edge margin: " & UIInchesText(result.EdgeMargin) & " in")
+        " in | Stock: 120 x 60 in | Gap: " & UIInchesText(result.PartGap) & " in | Edge margin: " & UINestMarginText(result))
     text = text & "0.5 w 0 G" & vbCrLf & UIPDFOutline(Array(Array(0, 0), Array(120, 0), Array(120, 60), Array(0, 60)), 0, 0, 0, 60, False)
-    text = text & "[3 3] 0 d 0.5 G" & vbCrLf & UIPDFOutline(Array(Array(result.EdgeMargin, result.EdgeMargin), _
-        Array(120 - result.EdgeMargin, result.EdgeMargin), Array(120 - result.EdgeMargin, 60 - result.EdgeMargin), _
-        Array(result.EdgeMargin, 60 - result.EdgeMargin)), 0, 0, 0, 60, False)
+    text = text & "[3 3] 0 d 0.5 G" & vbCrLf & UIPDFOutline(Array(Array(result.EdgeMarginLength, result.EdgeMarginWidth), _
+        Array(120 - result.EdgeMarginLength, result.EdgeMarginWidth), Array(120 - result.EdgeMarginLength, 60 - result.EdgeMarginWidth), _
+        Array(result.EdgeMarginLength, 60 - result.EdgeMarginWidth)), 0, 0, 0, 60, False)
     text = text & "[] 0 d 0 G 0.3 w 0.92 g" & vbCrLf
     b = result.GussetBottomWidth
     a = result.GussetTopWidth

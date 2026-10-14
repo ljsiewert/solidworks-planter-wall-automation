@@ -45,7 +45,7 @@ def polygon_clearance(first, second):
 class QuoteTests(unittest.TestCase):
     def test_summary_form_and_details_wiring(self):
         self.assertNotRegex(REPORT_FORM, r"\bheading[ \t]+\.")
-        self.assertIn("heading.Top = 136", REPORT_FORM)
+        self.assertIn("heading.Top = 188", REPORT_FORM)
         set_result = REPORT_FORM.split("Public Sub SetResult(", 1)[1].split("End Sub", 1)[0]
         self.assertIn("FillTable(componentsBox, componentRows", set_result)
         self.assertIn("FillTable(gussetsBox, gussetRows", set_result)
@@ -122,7 +122,16 @@ class QuoteTests(unittest.TestCase):
                           "OpenDoc", "Save", "Excel", "runLogger"):
             self.assertNotIn(forbidden, CALCULATOR)
         self.assertNotIn("pdfAssembliesBox.Value = True", FORM)
-        self.assertIn('256, "0.70"', FORM)
+        self.assertIn('AddPropertyText("txtPricePerPound", "Quote material ($/lb)", 40, "0.70")', FORM)
+        self.assertIn("UIQuotePricing quoteValues, CBool(paintedToggle.Value)", quote)
+        self.assertIn('"Forms.ToggleButton.1", "tglPainted"', FORM)
+        self.assertIn('AddButton("cmdProperties", "Properties..."', FORM)
+        for box in ("txtCutRate", "txtBendRate", "txtWeldRate", "txtPaintRate", "txtQuoteMargin",
+                    "txtPartGap", "txtEdgeMargin"):
+            self.assertIn(f'AddPropertyText("{box}"', FORM)
+        self.assertIn("Private WithEvents marginSpin As MSForms.SpinButton", REPORT_FORM)
+        self.assertIn("UIQuoteSetMargin quoteResult, margin", REPORT_FORM)
+        self.assertIn("pricing = UIQuotePricingCards(quoteResult)", REPORT_FORM)
         self.assertIn("pricePerPound = UIQuoteParsePrice(priceBox.Text)", quote)
         self.assertIn("height, pricePerPound, partGap, edgeMargin)", quote)
         self.assertIn("UIQuoteParsePrice = UIParseInches(text)", CALCULATOR)
@@ -163,9 +172,10 @@ class QuoteTests(unittest.TestCase):
                 body = body.replace('CreateObject("Shell.Application")', "New LayoutShell")
             if name == "UIPDFSheet":
                 body = body.replace("Dim quantities(7)", "Dim quantities(7)\n    For i = 0 To 7\n        quantities(i) = 0\n    Next")
-            if name == "UIQuoteParsePrice":
-                body = body.replace("On Error GoTo InvalidPrice", "On Error Resume Next\n    Err.Clear")
-                body = body.replace("    Exit Function\nInvalidPrice:", "    If Err.Number = 0 Then Exit Function\n    On Error GoTo 0")
+            if name in ("UIQuoteParsePrice", "UIQuoteParseRate"):
+                label = "InvalidPrice" if name == "UIQuoteParsePrice" else "InvalidRate"
+                body = body.replace(f"On Error GoTo {label}", "On Error Resume Next\n    Err.Clear")
+                body = body.replace(f"    Exit Function\n{label}:", "    If Err.Number = 0 Then Exit Function\n    On Error GoTo 0")
             if name == "UIQuoteGussets":
                 body = body.replace("    Select Case length\n", "")
                 body = body.replace("Case Is <= 24:", "If length <= 24 Then\n")
@@ -183,7 +193,7 @@ Dim other, price, summary, rows, gussetRows, totalRows, originalArea, originalWe
 Dim p, r, j, dx, dy, sheetArea, physicalCount, gap, margin, pairedCount, customItems(0, 4), customSheets
 Dim heuristicItems(7, 4), trialItems, trialWidths, trialHeights, legacyBest, extraBest, trialSheets, sortOrder, splitMode
 Dim maxItems(9, 4), maxBest, seenMax, stressItems(95, 4)
-Dim pdfText, pdfFile, pdfFSO, previewPath
+Dim pdfText, pdfFile, pdfFSO, previewPath, relaxLength, relaxWidth, relaxNames
 Const UI_ERROR = 2100
 Sub Assert(condition, message)
     If Not condition Then
@@ -211,14 +221,16 @@ End Class
         for name in ("UICalculateQuote", "UIQuoteFlatHeight", "UIQuotePart",
                      "UIQuoteComponents", "UIQuoteGussets", "UIQuoteReport",
                      "UIQuoteSummaryCards", "UIQuoteComponentRows", "UIQuoteGussetRows",
-                     "UIQuoteTableRows", "UIQuoteTotalRows", "UIQuoteSheetStats", "UIQuoteSheetRows"):
+                     "UIQuoteTableRows", "UIQuoteTotalRows", "UIQuoteSheetStats", "UIQuoteSheetRows",
+                     "UIQuoteDefaultRate", "UIQuotePricing", "UIQuoteSetMargin", "UIQuoteParseRate",
+                     "UIQuotePricingCards", "UIQuotePricingReport"):
             script += procedure(CALCULATOR, name) + "\n"
         for name in ("UIValidateSelections", "UIValidateDimensions", "UIInchesText", "UIParseInches"):
             script += procedure(MODULE, name) + "\n"
         script += procedure(CALCULATOR, "UIQuoteParsePrice") + "\n"
         for name in ("UINestQuote", "UINestSort", "UINestMax", "UINestPack", "UINestMaxRects",
                      "UINestFreeAdd", "UINestFreePrune", "UINestReport", "UINestBuildItems",
-                     "UINestFreeSubtract", "UINestEliminateSheet"):
+                     "UINestFreeSubtract", "UINestEliminateSheet", "UINestRelaxMargin", "UINestMarginText"):
             script += procedure(NESTING, name) + "\n"
         for name in ("UIQuoteLayoutPDF", "UIPDFObject", "UIPDFSummary", "UIPDFUsage", "UIPDFSheet", "UIPDFComponentIndex", "UIPDFOutline",
                      "UIPDFText", "UIPDFStyledText", "UIPDFRightText", "UIPDFRect", "UIPDFHeader", "UIPDFCard",
@@ -239,9 +251,9 @@ Sub CheckNest(q)
     pairs = 0
     For i = 0 To UBound(p)
         Assert p(i, 0) >= 1 And p(i, 0) <= q.SheetCount, "Placement sheet"
-        Assert p(i, 2) >= margin - 0.000001 And p(i, 3) >= margin - 0.000001, "Near edge margin"
-        Assert p(i, 2) + p(i, 4) <= 120 - margin + 0.000001, "Far length margin"
-        Assert p(i, 3) + p(i, 5) <= 60 - margin + 0.000001, "Far width margin"
+        Assert p(i, 2) >= q.EdgeMarginLength - 0.000001 And p(i, 3) >= q.EdgeMarginWidth - 0.000001, "Near edge margin"
+        Assert p(i, 2) + p(i, 4) <= 120 - q.EdgeMarginLength + 0.000001, "Far length margin"
+        Assert p(i, 3) + p(i, 5) <= 60 - q.EdgeMarginWidth + 0.000001, "Far width margin"
         Assert p(i, 6) = 0 Or p(i, 6) = 90, "Allowed bundle rotation"
         area = area + p(i, 7)
         parts = parts + p(i, 8)
@@ -292,8 +304,8 @@ Sub CheckNoRegression(q)
     End If
     totalGussets = q.Components(6).Quantity + q.Components(7).Quantity
     pairWidth = q.GussetBottomWidth + q.GussetTopWidth + q.PartGap * Sqr(1 + ((q.GussetBottomWidth - q.GussetTopWidth) / q.GussetHeight)^2)
-    pairFits = (pairWidth <= 120 - 2 * q.EdgeMargin And q.GussetHeight <= 60 - 2 * q.EdgeMargin) Or _
-               (q.GussetHeight <= 120 - 2 * q.EdgeMargin And pairWidth <= 60 - 2 * q.EdgeMargin)
+    pairFits = (pairWidth <= 120 - 2 * q.EdgeMarginLength And q.GussetHeight <= 60 - 2 * q.EdgeMarginWidth) Or _
+               (q.GussetHeight <= 120 - 2 * q.EdgeMarginLength And pairWidth <= 60 - 2 * q.EdgeMarginWidth)
     count = 0
     For i = 0 To 5
         count = count + q.Components(i).Quantity
@@ -357,13 +369,13 @@ Sub CheckNoRegression(q)
     For sortOrder = 0 To 3
         UINestSort items, sortOrder
         For splitMode = 0 To 5
-            trial = UINestPack(items, 120 - 2 * q.EdgeMargin, 60 - 2 * q.EdgeMargin, _
-                               q.PartGap, q.EdgeMargin, splitMode, sheets)
+            trial = UINestPack(items, 120 - 2 * q.EdgeMarginLength, 60 - 2 * q.EdgeMarginWidth, _
+                               q.PartGap, 0, splitMode, sheets)
             If sheets < baseline Then baseline = sheets
         Next
         For splitMode = 0 To 1
-            trial = UINestMaxRects(items, 120 - 2 * q.EdgeMargin, 60 - 2 * q.EdgeMargin, _
-                                  q.PartGap, q.EdgeMargin, splitMode, sheets)
+            trial = UINestMaxRects(items, 120 - 2 * q.EdgeMarginLength, 60 - 2 * q.EdgeMarginWidth, _
+                                  q.PartGap, 0, splitMode, sheets)
             If sheets < baseline Then baseline = sheets
         Next
     Next
@@ -436,14 +448,63 @@ Assert Abs(other.TotalMaterialCost - q.TotalMaterialCost * 2) < 0.000001, "User-
 Set other = UICalculateQuote(4, "N/A", "Single return 1 inch", "Mild Steel", "3/16 inch", 400, 400, 23.75)
 Assert Abs(other.TotalArea - 71582.9430666667) < 0.000001, "User example area retained"
 Assert Abs(other.TotalWeight - 3806.4128265) < 0.00001, "User example weight"
-Assert InStr(report, "NOT CALCULATED") > 0, "No invented cost"
+Assert InStr(report, "SELL PRICE: $" & FormatNumber(q.SellPrice, 2)) > 0, "Report shows sell price"
+Assert InStr(report, "NOT CALCULATED") = 0, "Purchased-sheet cost is now priced"
+Assert q.HasPricing And Not q.Painted And q.MarginPercent = 30, "Default pricing applied"
+Assert Abs(q.SheetWeight - q.SheetCount * 7200 * 0.25 * q.Density) < 0.000001, "Purchased sheet weight"
+Assert Abs(q.SheetMaterialCost - q.SheetWeight * 0.7) < 0.000001 And q.SheetMaterialCost > q.TotalMaterialCost, "Material includes scrap"
+Assert q.CutCost = 75 * q.SheetCount, "Cutting per sheet"
+Assert q.WeldedParts = 6 + 6 + 8 + 8 + 2 + 2 + 28 + 50 And q.WeldCost = 8 * q.WeldedParts, "Welding per part"
+Assert q.BentParts = 6 + 8 + 2 + 2 And q.BendCost = 5 * q.BentParts, "Bending only walls and side walls with returns"
+Assert q.PaintCost = 0 And q.PaintArea = 0, "Unpainted has no paint cost"
+Assert Abs(q.TotalCost - (q.SheetMaterialCost + q.LaborCost)) < 0.000001, "Total cost"
+Assert Abs(q.SellPrice - q.TotalCost / 0.7) < 0.000001 And Abs(q.Profit - q.SellPrice * 0.3) < 0.000001, "Gross margin sell price"
+UIQuotePricing q, True, 100, 10, 4, 3, 25
+Assert Abs(q.PaintArea - 2 * q.TotalArea / 144) < 0.000001 And Abs(q.PaintCost - 3 * q.PaintArea) < 0.000001, "Paint both sides"
+Assert q.CutCost = 100 * q.SheetCount And q.BendCost = 10 * q.BentParts And q.WeldCost = 4 * q.WeldedParts, "Custom labor rates"
+Assert Abs(q.SellPrice - q.TotalCost / 0.75) < 0.000001, "Custom margin"
+pdfText = q.TotalCost
+UIQuoteSetMargin q, 40
+Assert q.TotalCost = pdfText And Abs(q.SellPrice - q.TotalCost / 0.6) < 0.000001, "Margin change only moves sell price"
+summary = UIQuotePricingCards(q)
+Assert summary(2, 1) = "$" & FormatNumber(q.PaintCost, 2) And summary(3, 1) = "$" & FormatNumber(q.TotalCost, 2), "Pricing tiles"
+Assert InStr(summary(1, 2), "bend 18 parts") > 0, "Labor tooltip breakdown"
+summary = UIQuoteSummaryCards(q)
+Assert summary(0, 0) = "QUOTE SELL PRICE  (40.00% margin)" And summary(0, 1) = "$" & FormatNumber(q.SellPrice, 2), "Headline sell price"
+Assert InStr(summary(1, 1), "Mild Steel (painted)") > 0, "Painted shown in design"
+For Each price In Array(-1, 95.5, 100)
+    On Error Resume Next
+    UIQuoteSetMargin q, price
+    code = Err.Number
+    Err.Clear
+    On Error GoTo 0
+    Assert code <> 0, "Out-of-range margin rejected"
+Next
+On Error Resume Next
+UIQuotePricing q, False, -1, 5, 8, 2.5, 30
+code = Err.Number
+Err.Clear
+On Error GoTo 0
+Assert code <> 0, "Negative rate rejected"
+Assert UIQuoteParseRate("0", "x") = 0 And UIQuoteParseRate("0.00", "x") = 0 And UIQuoteParseRate(" 2.5 ", "x") = 2.5, "Rates accept zero"
+For Each price In Array("", "-1", "$5", "1,000", "5%", "0.0.0", ".")
+    On Error Resume Next
+    expected = UIQuoteParseRate(price, "Rate")
+    code = Err.Number
+    Err.Clear
+    On Error GoTo 0
+    Assert code <> 0, "Invalid rate rejected: " & price
+Next
+Set other = UICalculateQuote(4, "N/A", "No return", "Mild Steel", "1/4 inch", 300, 450, 48)
+Assert other.BentParts = 0 And other.BendCost = 0, "No return means no bending"
+UIQuotePricing q, False, 75, 5, 8, 2.5, 30
 originalArea = q.TotalArea
 originalWeight = q.TotalWeight
 originalCost = q.TotalMaterialCost
 summary = UIQuoteSummaryCards(q)
 rows = UIQuoteComponentRows(q)
 Assert UBound(summary, 1) = 6 And UBound(summary, 2) = 1, "Headline, design and five summary tiles"
-Assert summary(0, 0) = "PROFILE MATERIAL ESTIMATE" And summary(0, 1) = "$" & FormatNumber(q.TotalMaterialCost, 2), "Summary leads with estimate"
+Assert summary(0, 0) = "QUOTE SELL PRICE  (30.00% margin)" And summary(0, 1) = "$" & FormatNumber(q.SellPrice, 2), "Summary leads with sell price"
 Assert InStr(summary(1, 1), "1/4 in  |  $0.70/lb") > 0, "Readable thickness and price"
 Assert InStr(summary(1, 1), "300.000 x 450.000 x 48.000 in") > 0, "Rounded summary dimensions"
 Assert InStr(summary(1, 1), "CENTER_WALL_PATTERN_COUNT") = 0, "Technical equations not in summary"
@@ -629,7 +690,29 @@ For i = 0 To UBound(p)
     Next
 Next
 Set q = UICalculateQuote(1, "N/A", "No return", "Mild Steel", "1/4 inch", 120, 100, 20)
-Assert Not q.NestAvailable And InStr(q.NestStatus, "does not fit") > 0, "120-inch part rejects positive edge margin"
+WScript.Echo "Relaxed: " & q.NestWarning
+Assert q.NestAvailable, "120-inch part nests by using the sheet ends"
+Assert q.EdgeMarginLength = 0 And q.EdgeMarginWidth = 0.25, "Only the length-direction margin is reduced"
+Assert q.EdgeMargin = 0.25, "Requested margin is preserved"
+Assert InStr(q.NestWarning, "sheet ends") > 0 And InStr(q.NestWarning, "sheet sides") = 0, "Warning names the reduced edge"
+CheckNest q
+Assert q.HasPricing And q.SellPrice > 0, "Relaxed-margin layout is priced"
+Assert InStr(UIQuoteReport(q), "WARNING: Edge margin reduced") > 0, "Report shows reduced-margin warning"
+pdfText = UIQuoteLayoutPDF(q)
+Assert InStr(pdfText, "NOTE: Edge margin reduced") > 0, "PDF summary shows reduced-margin warning"
+relaxLength = 0.25
+relaxWidth = 0.25
+relaxNames = ""
+Assert UINestRelaxMargin("Fits", 119, 59, 0.25, relaxLength, relaxWidth, relaxNames), "Part within margins fits"
+Assert relaxLength = 0.25 And relaxWidth = 0.25 And relaxNames = "", "No relaxation when margins fit"
+Assert UINestRelaxMargin("Wide", 100, 59.8, 0.25, relaxLength, relaxWidth, relaxNames), "Full-width part fits"
+Assert relaxLength = 0.25 And Abs(relaxWidth - 0.1) < 0.000001 And relaxNames = "Wide", "Only the width margin is reduced"
+Assert Not UINestRelaxMargin("Too big", 120, 61, 0.25, relaxLength, relaxWidth, relaxNames), "Oversize part rejected"
+Set q = UICalculateQuote(4, "N/A", "Double return", "Mild Steel", "3/16 inch", 400, 205, 40)
+WScript.Echo "400x205x40: sheets=" & q.SheetCount & " sell=" & q.SellPrice & " warn=" & q.NestWarning
+Assert q.NestAvailable And q.HasPricing And q.EdgeMarginLength = 0, "120-inch center walls are priced"
+CheckNest q
+q.NestAvailable = False
 On Error Resume Next
 pdfText = UIQuoteLayoutPDF(q)
 code = Err.Number
@@ -924,7 +1007,7 @@ WScript.Echo "PASS: screenshot, 288 scenarios, thresholds, warnings, totals and 
         base_script += "\nClass UIQuoteComponent\n" + comp_fields + "\nEnd Class\n"
         for name in ("UINestQuote", "UINestSort", "UINestMax", "UINestPack", "UINestMaxRects",
                      "UINestFreeAdd", "UINestFreePrune", "UINestReport", "UINestBuildItems",
-                     "UINestFreeSubtract", "UINestEliminateSheet"):
+                     "UINestFreeSubtract", "UINestEliminateSheet", "UINestRelaxMargin", "UINestMarginText"):
             base_script += procedure(NESTING, name) + "\n"
 
         test_body = base_script + r"""
@@ -1133,9 +1216,10 @@ WScript.Echo "PASS: demonstrable improvements and sheet elimination"
             body = body.replace("Right$(", "Right(").replace("Format$(", "FormatNumberPDF(")
             body = body.replace("Left$(", "Left(").replace("ByRef offsets()", "ByRef offsets").replace("Mid$(", "Mid(").replace("Trim$(", "Trim(")
             body = body.replace("Str$(value)", "CStr(value)").replace("Val(cleaned)", "CDbl(cleaned)")
-            if name == "UIQuoteParsePrice":
-                body = body.replace("On Error GoTo InvalidPrice", "On Error Resume Next\n    Err.Clear")
-                body = body.replace("    Exit Function\nInvalidPrice:", "    If Err.Number = 0 Then Exit Function\n    On Error GoTo 0")
+            if name in ("UIQuoteParsePrice", "UIQuoteParseRate"):
+                label = "InvalidPrice" if name == "UIQuoteParsePrice" else "InvalidRate"
+                body = body.replace(f"On Error GoTo {label}", "On Error Resume Next\n    Err.Clear")
+                body = body.replace(f"    Exit Function\n{label}:", "    If Err.Number = 0 Then Exit Function\n    On Error GoTo 0")
             if name == "UIQuoteGussets":
                 body = body.replace("    Select Case length\n", "")
                 body = body.replace("Case Is <= 24:", "If length <= 24 Then\n")
@@ -1156,14 +1240,16 @@ WScript.Echo "PASS: demonstrable improvements and sheet elimination"
         for name in ("UICalculateQuote", "UIQuoteFlatHeight", "UIQuotePart",
                      "UIQuoteComponents", "UIQuoteGussets", "UIQuoteReport",
                      "UIQuoteSummaryCards", "UIQuoteComponentRows", "UIQuoteGussetRows",
-                     "UIQuoteTableRows", "UIQuoteTotalRows", "UIQuoteSheetStats", "UIQuoteSheetRows"):
+                     "UIQuoteTableRows", "UIQuoteTotalRows", "UIQuoteSheetStats", "UIQuoteSheetRows",
+                     "UIQuoteDefaultRate", "UIQuotePricing", "UIQuoteSetMargin", "UIQuoteParseRate",
+                     "UIQuotePricingCards", "UIQuotePricingReport"):
             base += procedure(CALCULATOR, name) + "\n"
         for name in ("UIValidateSelections", "UIValidateDimensions", "UIInchesText", "UIParseInches"):
             base += procedure(MODULE, name) + "\n"
         base += procedure(CALCULATOR, "UIQuoteParsePrice") + "\n"
         for name in ("UINestQuote", "UINestSort", "UINestMax", "UINestPack", "UINestMaxRects",
                      "UINestFreeAdd", "UINestFreePrune", "UINestReport", "UINestBuildItems",
-                     "UINestFreeSubtract", "UINestEliminateSheet"):
+                     "UINestFreeSubtract", "UINestEliminateSheet", "UINestRelaxMargin", "UINestMarginText"):
             base += procedure(NESTING, name) + "\n"
 
         test_body = base + r"""
@@ -1189,9 +1275,9 @@ Sub CheckExample(q, name, expSheets, expBaseline, expParts, expAreaSqFt)
     parts = 0
     For i = 0 To UBound(p)
         Assert p(i, 0) >= 1 And p(i, 0) <= q.SheetCount, name & " sheet index"
-        Assert p(i, 2) >= margin - 0.000001 And p(i, 3) >= margin - 0.000001, name & " near margin"
-        Assert p(i, 2) + p(i, 4) <= 120 - margin + 0.000001, name & " far length"
-        Assert p(i, 3) + p(i, 5) <= 60 - margin + 0.000001, name & " far width"
+        Assert p(i, 2) >= q.EdgeMarginLength - 0.000001 And p(i, 3) >= q.EdgeMarginWidth - 0.000001, name & " near margin"
+        Assert p(i, 2) + p(i, 4) <= 120 - q.EdgeMarginLength + 0.000001, name & " far length"
+        Assert p(i, 3) + p(i, 5) <= 60 - q.EdgeMarginWidth + 0.000001, name & " far width"
         Assert p(i, 6) = 0 Or p(i, 6) = 90, name & " rotation"
         area = area + p(i, 7)
         parts = parts + p(i, 8)

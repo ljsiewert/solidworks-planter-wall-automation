@@ -7,12 +7,19 @@ Private headlineValue As MSForms.Label
 Private designLabel As MSForms.Label
 Private tileCaptions(0 To 4) As MSForms.Label
 Private tileValues(0 To 4) As MSForms.Label
+Private priceTiles(0 To 4) As MSForms.Label
+Private priceCaptions(0 To 4) As MSForms.Label
+Private priceValues(0 To 4) As MSForms.Label
+Private WithEvents marginBox As MSForms.TextBox
+Private WithEvents marginSpin As MSForms.SpinButton
+Private updatingMargin As Boolean
 Private summaryControls As Collection
 Private componentsBox As MSForms.Frame
 Private gussetsBox As MSForms.Frame
 Private totalsBox As MSForms.ListBox
 Private sheetBox As MSForms.Frame
 Private sheetTitle As MSForms.Label
+Private nestWarningLabel As MSForms.Label
 Private columnLabels As Collection
 Private gussetHeadings As Collection
 Private sheetHeadings As Collection
@@ -31,7 +38,7 @@ Private Sub UserForm_Initialize()
     Dim i As Long
     Me.Caption = "Planter Material Estimate"
     Me.Width = 780
-    Me.Height = 570
+    Me.Height = 622
     Me.ScrollBars = fmScrollBarsNone
     Set summaryControls = New Collection
     AddSummaryLabel "lblHeaderBand", 12, 10, 744, 66, 8, False, RGB(31, 73, 125), RGB(255, 255, 255), True
@@ -41,9 +48,43 @@ Private Sub UserForm_Initialize()
     designLabel.TextAlign = fmTextAlignRight
     designLabel.WordWrap = True
     For i = 0 To 4
-        AddSummaryLabel "lblTile" & CStr(i), 12 + i * 150.5, 84, 142, 44, 8, False, RGB(237, 242, 248), 0, True
-        Set tileCaptions(i) = AddSummaryLabel("lblTileCaption" & CStr(i), 20 + i * 150.5, 89, 128, 12, 8, False, 0, RGB(89, 89, 89), False)
-        Set tileValues(i) = AddSummaryLabel("lblTileValue" & CStr(i), 20 + i * 150.5, 103, 128, 22, 14, True, 0, RGB(31, 73, 125), False)
+        Set priceTiles(i) = AddSummaryLabel("lblPriceTile" & CStr(i), 12 + i * 150.5, 84, 142, 44, 8, False, RGB(255, 247, 227), 0, True)
+        Set priceCaptions(i) = AddSummaryLabel("lblPriceCaption" & CStr(i), 20 + i * 150.5, 89, 128, 12, 8, False, 0, RGB(89, 89, 89), False)
+        Set priceValues(i) = AddSummaryLabel("lblPriceValue" & CStr(i), 20 + i * 150.5, 103, 128, 22, 14, True, 0, RGB(31, 73, 125), False)
+    Next i
+    priceValues(3).ForeColor = RGB(0, 0, 0)
+    ' Margin tile: editable percent with a spinner; profit updates beside it.
+    priceValues(4).Left = 690
+    priceValues(4).Width = 62
+    priceValues(4).Font.Size = 10
+    priceValues(4).Top = 107
+    Set marginBox = Me.Controls.Add("Forms.TextBox.1", "txtMargin", True)
+    With marginBox
+        .Left = 620
+        .Top = 103
+        .Width = 44
+        .Height = 20
+        .Font.Size = 11
+        .Font.Bold = True
+        .TextAlign = fmTextAlignRight
+        .ControlTipText = "Gross margin % (0-95). Sell price = total cost / (1 - margin)."
+    End With
+    summaryControls.Add marginBox
+    Set marginSpin = Me.Controls.Add("Forms.SpinButton.1", "spnMargin", True)
+    With marginSpin
+        .Left = 666
+        .Top = 103
+        .Width = 16
+        .Height = 20
+        .Min = 0
+        .Max = 95
+        .SmallChange = 1
+    End With
+    summaryControls.Add marginSpin
+    For i = 0 To 4
+        AddSummaryLabel "lblTile" & CStr(i), 12 + i * 150.5, 136, 142, 44, 8, False, RGB(237, 242, 248), 0, True
+        Set tileCaptions(i) = AddSummaryLabel("lblTileCaption" & CStr(i), 20 + i * 150.5, 141, 128, 12, 8, False, 0, RGB(89, 89, 89), False)
+        Set tileValues(i) = AddSummaryLabel("lblTileValue" & CStr(i), 20 + i * 150.5, 155, 128, 22, 14, True, 0, RGB(31, 73, 125), False)
     Next i
     tileValues(4).ForeColor = RGB(191, 87, 0)
     Set columnLabels = New Collection
@@ -56,13 +97,13 @@ Private Sub UserForm_Initialize()
         Set heading = Me.Controls.Add("Forms.Label.1", "lblColumn" & CStr(i), True)
         heading.Caption = captions(i)
         heading.Left = positions(i)
-        heading.Top = 136
+        heading.Top = 188
         heading.Width = widths(i)
         heading.Height = 16
         heading.Font.Bold = True
         columnLabels.Add heading
     Next i
-    Set componentsBox = AddTableFrame("lstComponents", 152)
+    Set componentsBox = AddTableFrame("lstComponents", 204)
     captions = Array("Gusset", "Qty", "Height (in)", "Top width (in)", "Base width (in)", "Total wt (lb)", "Material cost")
     positions = Array(12, 192, 242, 332, 422, 512, 622)
     widths = Array(180, 50, 90, 90, 90, 110, 130)
@@ -70,18 +111,18 @@ Private Sub UserForm_Initialize()
         Set heading = Me.Controls.Add("Forms.Label.1", "lblGussetColumn" & CStr(i), True)
         heading.Caption = captions(i)
         heading.Left = positions(i)
-        heading.Top = 254
+        heading.Top = 306
         heading.Width = widths(i)
         heading.Height = 16
         heading.Font.Bold = True
         columnLabels.Add heading
         gussetHeadings.Add heading
     Next i
-    Set gussetsBox = AddTableFrame("lstGussets", 270)
+    Set gussetsBox = AddTableFrame("lstGussets", 322)
     Set totalsBox = Me.Controls.Add("Forms.ListBox.1", "lstMaterialTotal", True)
     With totalsBox
         .Left = 12
-        .Top = 318
+        .Top = 370
         .Width = 744
         .Height = 20
         .ColumnCount = 3
@@ -93,7 +134,7 @@ Private Sub UserForm_Initialize()
     With sheetTitle
         .Caption = "SHEET USAGE - UNUSED / POTENTIAL SCRAP (includes reusable remnants)"
         .Left = 12
-        .Top = 344
+        .Top = 396
         .Width = 744
         .Height = 16
         .Font.Bold = True
@@ -106,20 +147,31 @@ Private Sub UserForm_Initialize()
         Set heading = Me.Controls.Add("Forms.Label.1", "lblSheetColumn" & CStr(i), True)
         heading.Caption = captions(i)
         heading.Left = positions(i)
-        heading.Top = 360
+        heading.Top = 412
         heading.Width = widths(i)
         heading.Height = 16
         heading.Font.Bold = True
         columnLabels.Add heading
         sheetHeadings.Add heading
     Next i
-    Set sheetBox = AddTableFrame("lstSheetUsage", 376)
+    Set sheetBox = AddTableFrame("lstSheetUsage", 428)
+    Set nestWarningLabel = Me.Controls.Add("Forms.Label.1", "lblNestWarning", True)
+    With nestWarningLabel
+        .Left = 12
+        .Top = 494
+        .Width = 744
+        .Height = 14
+        .Font.Bold = True
+        .Font.Size = 8
+        .ForeColor = RGB(191, 87, 0)
+        .Visible = False
+    End With
     Set reportBox = Me.Controls.Add("Forms.TextBox.1", "txtQuoteReport", True)
     With reportBox
         .Left = 12
         .Top = 10
         .Width = 744
-        .Height = 494
+        .Height = 546
         .MultiLine = True
         .ScrollBars = fmScrollBarsVertical
         .Locked = True
@@ -128,12 +180,12 @@ Private Sub UserForm_Initialize()
     End With
     Set note = Me.Controls.Add("Forms.Label.1", "lblEstimateNotes", True)
     note.Left = 12
-    note.Top = 462
+    note.Top = 514
     note.Width = 744
     note.Height = 46
     note.Font.Size = 8
     note.ForeColor = RGB(89, 89, 89)
-    note.Caption = "Material only - not a final manufacturing quote. Sheet offcuts, fabrication, labor and margin excluded." & vbCrLf & _
+    note.Caption = "Estimate - not a final manufacturing quote. Labor and paint use placeholder rates (see Properties); hover tiles for breakdowns." & vbCrLf & _
         "Holes/reliefs not deducted. Flat heights use calibrated measurements; other heights are predictions." & vbCrLf & _
         "Both steels use an estimating density of 7850 kg/m^3; BORCON-specific density is unverified." & vbCrLf & _
         "Sheet estimates use provisional gap/margin settings; Operations must verify. Unused area may be reusable remnant."
@@ -141,7 +193,7 @@ Private Sub UserForm_Initialize()
     With detailsButton
         .Caption = "Technical Details"
         .Left = 12
-        .Top = 512
+        .Top = 564
         .Width = 130
         .Height = 24
     End With
@@ -149,7 +201,7 @@ Private Sub UserForm_Initialize()
     With pdfButton
         .Caption = "Preview Sheet Layout"
         .Left = 152
-        .Top = 512
+        .Top = 564
         .Width = 150
         .Height = 24
         .Enabled = False
@@ -158,7 +210,7 @@ Private Sub UserForm_Initialize()
     With closeButton
         .Caption = "Close"
         .Left = 666
-        .Top = 512
+        .Top = 564
         .Width = 90
         .Height = 24
         .Default = True
@@ -189,6 +241,13 @@ Public Sub SetResult(ByVal result As UIQuoteResult)
         tileCaptions(i).Caption = cards(i + 2, 0)
         tileValues(i).Caption = cards(i + 2, 1)
     Next i
+    updatingMargin = True
+    marginBox.Text = CStr(result.MarginPercent)
+    marginSpin.Value = Int(result.MarginPercent)
+    updatingMargin = False
+    marginBox.Enabled = result.HasPricing
+    marginSpin.Enabled = result.HasPricing
+    RefreshPricing
     componentRows = UIQuoteComponentRows(result)
     gussetRows = UIQuoteGussetRows(result)
     totalsBox.List = UIQuoteTotalRows(result)
@@ -197,7 +256,7 @@ Public Sub SetResult(ByVal result As UIQuoteResult)
     If Not result.NestAvailable Then sheetTitle.Caption = result.NestStatus
     reportBox.Text = UIQuoteReport(result)
     ' Each table is exactly as tall as its rows; controls below move up to follow.
-    y = FillTable(componentsBox, componentRows, Array(200, 50, 100, 130, 110, 150), componentsBox.Top, 200) + 6
+    y = FillTable(componentsBox, componentRows, Array(200, 50, 100, 130, 110, 150), componentsBox.Top, 150) + 6
     For Each heading In gussetHeadings
         heading.Top = y
     Next heading
@@ -207,7 +266,68 @@ Public Sub SetResult(ByVal result As UIQuoteResult)
     For Each heading In sheetHeadings
         heading.Top = sheetTitle.Top + 16
     Next heading
-    FillTable sheetBox, sheetRows, Array(80, 60, 120, 220, 110, 130), sheetTitle.Top + 32, 456 - (sheetTitle.Top + 32)
+    ' A reduced edge margin is flagged directly under the sheet table.
+    nestWarningLabel.Caption = result.NestWarning
+    nestWarningLabel.ControlTipText = result.NestWarning
+    If Len(result.NestWarning) > 0 Then
+        y = FillTable(sheetBox, sheetRows, Array(80, 60, 120, 220, 110, 130), sheetTitle.Top + 32, 494 - (sheetTitle.Top + 32))
+        nestWarningLabel.Top = y + 2
+        nestWarningLabel.Visible = Not showingDetails
+    Else
+        FillTable sheetBox, sheetRows, Array(80, 60, 120, 220, 110, 130), sheetTitle.Top + 32, 508 - (sheetTitle.Top + 32)
+        nestWarningLabel.Visible = False
+    End If
+End Sub
+
+' Recomputes sell price from the edited margin; invalid entries leave the last valid price shown.
+Private Sub ApplyMargin()
+    Dim margin As Double
+    If quoteResult Is Nothing Then Exit Sub
+    If Not quoteResult.HasPricing Then Exit Sub
+    On Error GoTo InvalidMargin
+    margin = UIQuoteParseRate(marginBox.Text, "Margin")
+    UIQuoteSetMargin quoteResult, margin
+    On Error GoTo 0
+    marginBox.ForeColor = RGB(0, 0, 0)
+    updatingMargin = True
+    marginSpin.Value = Int(margin)
+    updatingMargin = False
+    RefreshPricing
+    Exit Sub
+InvalidMargin:
+    marginBox.ForeColor = RGB(192, 0, 0)
+    headlineCaption.Caption = "ENTER A MARGIN FROM 0 TO 95%"
+End Sub
+
+Private Sub RefreshPricing()
+    Dim cards As Variant
+    Dim pricing As Variant
+    Dim i As Long
+    cards = UIQuoteSummaryCards(quoteResult)
+    headlineCaption.Caption = cards(0, 0)
+    headlineValue.Caption = cards(0, 1)
+    pricing = UIQuotePricingCards(quoteResult)
+    For i = 0 To 4
+        priceCaptions(i).Caption = pricing(i, 0)
+        priceValues(i).Caption = pricing(i, 1)
+        priceTiles(i).ControlTipText = pricing(i, 2)
+        priceCaptions(i).ControlTipText = pricing(i, 2)
+        priceValues(i).ControlTipText = pricing(i, 2)
+    Next i
+    reportBox.Text = UIQuoteReport(quoteResult)
+End Sub
+
+Private Sub marginBox_Change()
+    If updatingMargin Then Exit Sub
+    ApplyMargin
+End Sub
+
+Private Sub marginSpin_Change()
+    If updatingMargin Then Exit Sub
+    updatingMargin = True
+    marginBox.Text = CStr(marginSpin.Value)
+    updatingMargin = False
+    ApplyMargin
 End Sub
 
 Private Function AddTableFrame(ByVal controlName As String, ByVal top As Single) As MSForms.Frame
@@ -283,7 +403,7 @@ End Sub
 
 Private Sub detailsButton_Click()
     Dim heading As MSForms.Label
-    Dim item As MSForms.Label
+    Dim item As Object
     showingDetails = Not showingDetails
     For Each item In summaryControls
         item.Visible = Not showingDetails
@@ -293,6 +413,7 @@ Private Sub detailsButton_Click()
     totalsBox.Visible = Not showingDetails
     sheetBox.Visible = Not showingDetails
     sheetTitle.Visible = Not showingDetails
+    nestWarningLabel.Visible = Not showingDetails And Len(nestWarningLabel.Caption) > 0
     For Each heading In columnLabels
         heading.Visible = Not showingDetails
     Next heading

@@ -28,6 +28,12 @@ The five original macro sources remain unchanged by the UI integration.
   Excel, rebuilding, Pack-and-Go, exports or an output folder. Profile weight
   and material cost use a shared estimating steel density and an editable
   $/lb input defaulting to 0.70. All exports start unchecked.
+- Quote pricing adds labor (cutting per sheet, bending per bent part when a
+  return is selected, welding per part), optional paint (Painted toggle next
+  to Material; $/sq ft on both sides), total cost, gross margin and sell
+  price. Material is priced on full purchased sheets so scrap is included.
+  Rates, material $/lb, part gap and edge margin live under **Properties...**
+  on the input form; margin can also be adjusted live on the results page.
 - Quote results open with a cost/weight/design summary and a compact component
   table. Technical Details retains the full calculation report and assumptions.
 - A 120 x 60-inch sheet estimator nests rectangles and shape-aware opposed

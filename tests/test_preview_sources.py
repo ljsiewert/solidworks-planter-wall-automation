@@ -74,7 +74,6 @@ Assert Not quoteBox.Value And Not pdfAssembliesBox.Value And Not pdfComponentsBo
 Assert Not dxfBox.Value And Not stepBox.Value, "Preview clears DXF/STEP"
 Assert Not quoteBox.Enabled And Not pdfAssembliesBox.Enabled And Not stepBox.Enabled, "Preview disables export choices"
 Assert Not folderBox.Enabled And Not browseButton.Enabled, "Preview needs no destination"
-Assert Not priceBox.Enabled, "Preview ignores pricing"
 previewBox.Value = False
 previewBox_Click
 Assert quoteBox.Enabled And pdfAssembliesBox.Enabled And folderBox.Enabled, "Exiting preview reenables controls"
@@ -83,13 +82,10 @@ quoteBox.Value = True
 quoteBox_Click
 Assert Not pdfAssembliesBox.Value And Not pdfAssembliesBox.Enabled, "Quote disables all PDFs"
 Assert Not folderBox.Enabled And Not browseButton.Enabled And Not previewBox.Enabled, "Quote needs no folder or preview"
-Assert priceBox.Enabled, "Quote enables editable pricing"
-Assert gapBox.Enabled And marginBox.Enabled, "Quote enables nesting settings"
 quoteBox.Value = False
 quoteBox_Click
 Assert folderBox.Enabled And previewBox.Enabled And pdfAssembliesBox.Enabled, "Leaving quote reenables controls"
 Assert Not pdfAssembliesBox.Value, "Leaving quote does not reselect PDFs"
-Assert Not priceBox.Enabled, "Model runs do not validate price"
 quoteOnly = True
 exportPDFAssemblies = True
 exportPDFComponents = True
