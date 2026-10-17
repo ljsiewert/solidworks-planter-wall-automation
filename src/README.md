@@ -270,6 +270,69 @@ labor, paint, total cost, margin). The margin box and spinner recalculate the
 sell price and profit immediately; hover any pricing tile for its breakdown.
 Technical Details includes the full pricing calculation.
 
+#### Field assembly estimates
+
+In **Quote only**, **Quantity** defaults to 1 and accepts whole numbers from
+1 to 2000. It is disabled for model/preview runs and does not duplicate CAD
+assemblies. Quantity scales component counts, profile totals, welding and
+paint; all copies of that design are re-nested together, so purchased sheets
+and cutting labor are recalculated rather than multiplying rounded prices.
+The existing limit of 2000 physical components **per design including copies**
+still applies; an over-limit design has no layout or valid quote price.
+
+All quote-only runs use the field assembly, even for a single design.
+**Run field** is disabled until at least one planter is added.
+Quantity and design name are in the right-hand **FIELD ASSEMBLY - QUOTE ONLY**
+panel, not the main design inputs. **Preview only** sits to the right of
+**Quote only**; these remain mutually exclusive input modes.
+
+1. Enter a design, quantity and optional design name in the right-hand panel.
+2. Select material, thickness, Painted and any quote Properties for that design.
+3. Click **Add planter**. This captures a snapshot of the current inputs and rates.
+4. Select a saved row to load its name, quantity, dimensions, wall/return type,
+   material, thickness, Painted choice and quote properties. Make changes and
+   click **Save changes** to recalculate and replace that row in place.
+   **New design** deselects the row and resets name/quantity, retaining other
+   inputs as a starting point; **Add planter** always adds another row.
+5. Click **Run field**. **Only saved rows are quoted**; draft or unsaved input
+   edits are not included. Remove all rows to leave Quote only mode.
+
+Each design nests on its own sheets, even when materials match, to preserve
+section separation for Operations. Designs may use different materials,
+thicknesses, paint choices and prices without sharing stock.
+The field results list shows each design's quantity, sheets, total cost and
+sell price, plus combined material, labor, paint, cost, profit and sell price.
+The sell price is the primary headline, with profit/total cost as secondary
+cards and material/labor/paint/sheets as smaller supporting cards.
+No complete field totals are displayed if any design cannot be priced.
+**View selected** opens its existing detailed results and layout PDF, with
+component quantities and layouts covering **all copies of that design**.
+The PDF identifies the design and quantity; a combined field PDF is not generated.
+The design/quantity line sits above the PDF summary cards with a reserved gap.
+Field-summary column headings use the same widths as their data columns.
+The margin in Properties sets the **whole field's** margin when running.
+The results margin text box and arrow spinner update **every design**
+and the field totals immediately (0-95%). Per-design detail margins are
+read-only so the field always has one common gross margin. Invalid margin
+input is shown in red with a last-valid-price notice.
+
+**Preview selected** hides the field results while running the same guarded
+preview workflow as the input UI for **one copy** of the selected design.
+The original, clean `planter_assembly.SLDASM` must be active. Preview updates
+the unsaved template only; it creates no Pack-and-Go copies or exports, and
+does not modify quote quantities or prices. The field results return after the
+preview; close the results to inspect the model. Close the template **without
+saving** and reopen it before another preview or model run. Preview failures
+are reported without discarding the field quote.
+No per-copy sheet/cost dropdown is shown, because copies share a nest.
+
+Install/update: replace `userform_automation`, `ui_quote_calculator`,
+`ui_quote_layout_pdf`, `UIQuoteResult`, and the code behind
+`UserForm_AutomationUI` and `UserForm_QuoteReport`. Import the new `ui_quote_field.bas` module and create
+a new UserForm named **UserForm_FieldQuote**, pasting its `.frm` code starting
+at `Option Explicit` (not a designer-form import). Keep the existing
+`UserForm_QuoteReport`, then Debug > Compile and save.
+
 #### Sheet nesting estimate and Operations verification
 
 Quote-only now includes editable **Quote part gap (in)** and **Quote edge

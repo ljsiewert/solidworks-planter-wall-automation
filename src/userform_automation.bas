@@ -4,6 +4,7 @@ Option Explicit
 ' Import into the SAME VBA project as packngo1, not the exporter projects.
 Public quoteOnly As Boolean
 Public quoteValues As UIQuoteResult
+Public quoteDesigns As Collection
 Public previewOnly As Boolean
 Public exportPDFAssemblies As Boolean
 Public exportPDFComponents As Boolean
@@ -57,13 +58,14 @@ Public Sub RunWithUI()
     On Error GoTo Failed
     uiRunning = True
     Set quoteValues = Nothing
+    Set quoteDesigns = Nothing
     Set form = New UserForm_AutomationUI
     form.Show vbModal
     If form.Accepted Then
         Unload form
         Set form = Nothing
         If quoteOnly Then
-            UIShowQuote quoteValues
+            UIShowFieldQuote quoteDesigns
         Else
             If Not packngo1.Step1_Initialize() Then GoTo Finished
             UIRequireCleanTemplate packngo1.swModel
@@ -83,6 +85,7 @@ Public Sub RunWithUI()
 Finished:
     If Not form Is Nothing Then Unload form
     Set quoteValues = Nothing
+    Set quoteDesigns = Nothing
     uiRunning = False
     Exit Sub
 
@@ -97,6 +100,48 @@ Public Sub UIDisableExports()
     exportPDFComponents = False
     exportDXF = False
     exportSTEP = False
+End Sub
+
+Public Sub UIPreviewQuoteDesign(ByVal result As UIQuoteResult)
+    Dim previousInputs As Variant
+    Dim previousQuoteOnly As Boolean
+    Dim previousPreviewOnly As Boolean
+    Dim previousOutput As String
+    Dim gauge As String
+    Dim material As String
+    Dim failure As String
+    previousInputs = designTableInputs
+    previousQuoteOnly = quoteOnly
+    previousPreviewOnly = previewOnly
+    previousOutput = outputFolder
+    On Error GoTo Failed
+    If Not packngo1.Step1_Initialize() Then GoTo Finished
+    UIRequireCleanTemplate packngo1.swModel
+    If StrComp(packngo1.GetFileName(packngo1.swModel.GetPathName), _
+               "planter_assembly.SLDASM", vbTextCompare) <> 0 Then
+        Err.Raise UI_ERROR, "UIPreviewQuoteDesign", "Start preview from the original planter_assembly.SLDASM template."
+    End If
+    UIMapSelections result.WallCount, result.Orientation, result.ReturnLabel, result.Material, _
+        IIf(result.Thickness = 0.25, "1/4 inch", "3/16 inch")
+    packngo1.overallLength = CStr(result.OverallLength)
+    packngo1.overallWidth = CStr(result.OverallWidth)
+    packngo1.overallHeight = CStr(result.Height)
+    gauge = IIf(result.Thickness = 0.25, "1/4", "3/16")
+    material = IIf(result.Material = "Mild Steel", "MILD STEEL", "BORCON WEATHERING STEEL")
+    designTableInputs = Array(UIWallTableLabel(result.WallCount, result.Orientation), _
+        UIReturnTableLabel(result.ReturnLabel), result.OverallLength, result.OverallWidth, result.Height, gauge, material)
+    previewOnly = True
+    UIRunPreview
+Finished:
+    designTableInputs = previousInputs
+    quoteOnly = previousQuoteOnly
+    previewOnly = previousPreviewOnly
+    outputFolder = previousOutput
+    Exit Sub
+Failed:
+    failure = Err.Description
+    MsgBox failure, vbExclamation, "Selected Planter Preview"
+    Resume Finished
 End Sub
 
 Private Sub UIRunPreview()

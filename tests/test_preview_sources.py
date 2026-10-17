@@ -41,8 +41,12 @@ class PreviewTests(unittest.TestCase):
 Option Explicit
 Dim previewBox, quoteBox, folderBox, browseButton, pdfAssembliesBox, pdfComponentsBox, dxfBox, stepBox, priceBox, gapBox, marginBox
 Dim quoteOnly, exportPDFAssemblies, exportPDFComponents, exportDXF, exportSTEP
+Dim fieldDesigns, quantityBox, designNameBox, addPlanterButton, removePlanterButton, updatePlanterButton, newPlanterButton, planterList, runButton
 Class Control
-    Public Value, Enabled
+    Public Value, Enabled, Caption, ListIndex
+End Class
+Class Designs
+    Public Count
 End Class
 Sub Assert(condition, message)
     If Not condition Then
@@ -61,6 +65,17 @@ Set stepBox = New Control
 Set priceBox = New Control
 Set gapBox = New Control
 Set marginBox = New Control
+Set fieldDesigns = New Designs
+fieldDesigns.Count = 0
+Set quantityBox = New Control
+Set designNameBox = New Control
+Set addPlanterButton = New Control
+Set removePlanterButton = New Control
+Set updatePlanterButton = New Control
+Set newPlanterButton = New Control
+Set planterList = New Control
+planterList.ListIndex = -1
+Set runButton = New Control
 '''
         script += "\n".join(methods) + r'''
 quoteBox.Value = True
@@ -82,6 +97,11 @@ quoteBox.Value = True
 quoteBox_Click
 Assert Not pdfAssembliesBox.Value And Not pdfAssembliesBox.Enabled, "Quote disables all PDFs"
 Assert Not folderBox.Enabled And Not browseButton.Enabled And Not previewBox.Enabled, "Quote needs no folder or preview"
+Assert Not runButton.Enabled, "Empty field disables Run"
+fieldDesigns.Count = 1
+quoteBox_Click
+Assert runButton.Enabled And runButton.Caption = "Run field", "Added design enables field run"
+fieldDesigns.Count = 0
 quoteBox.Value = False
 quoteBox_Click
 Assert folderBox.Enabled And previewBox.Enabled And pdfAssembliesBox.Enabled, "Leaving quote reenables controls"

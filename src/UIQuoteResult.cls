@@ -9,6 +9,8 @@ Attribute VB_PredeclaredId = False
 Attribute VB_Exposed = False
 Option Explicit
 
+Public Quantity As Long
+Public EstimateLabel As String
 Public WallCount As Long
 Public Orientation As String
 Public ReturnLabel As String
