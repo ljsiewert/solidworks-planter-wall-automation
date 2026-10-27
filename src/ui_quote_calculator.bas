@@ -9,11 +9,12 @@ Public Function UICalculateQuote(ByVal walls As Long, ByVal orientation As Strin
     Dim result As UIQuoteResult
     Dim available As Double
     UIValidateSelections walls, orientation, returnLabel, material, thicknessLabel
-    UIValidateDimensions length, width, height
+    UIValidateDimensions length, width, height, walls
     If pricePerPound <= 0 Then
         Err.Raise vbObjectError + 2400, "UICalculateQuote", "Material price must be greater than zero dollars per lb."
     End If
     Set result = New UIQuoteResult
+    result.Quantity = 1
     result.Density = 7850 * (0.0254 ^ 3) / 0.45359237
     result.PricePerPound = pricePerPound
     result.WallCount = walls
@@ -62,6 +63,48 @@ Public Function UICalculateQuote(ByVal walls As Long, ByVal orientation As Strin
         UIQuoteDefaultRate("Weld"), UIQuoteDefaultRate("Paint"), UIQuoteDefaultRate("Margin")
     Set UICalculateQuote = result
 End Function
+
+Public Function UIQuoteParseQuantity(ByVal text As String) As Long
+    Dim i As Long
+    text = Trim$(text)
+    If Len(text) = 0 Or Len(text) > 4 Then
+        Err.Raise vbObjectError + 2400, "UIQuoteParseQuantity", "Quantity must be a whole number from 1 to 2000."
+    End If
+    For i = 1 To Len(text)
+        If Mid$(text, i, 1) < "0" Or Mid$(text, i, 1) > "9" Then
+            Err.Raise vbObjectError + 2400, "UIQuoteParseQuantity", "Quantity must be a whole number from 1 to 2000."
+        End If
+    Next i
+    UIQuoteParseQuantity = CLng(text)
+    If UIQuoteParseQuantity < 1 Or UIQuoteParseQuantity > 2000 Then
+        Err.Raise vbObjectError + 2400, "UIQuoteParseQuantity", "Quantity must be a whole number from 1 to 2000."
+    End If
+End Function
+
+' Nest all copies of one design together; field designs remain on separate sheets.
+Public Sub UIQuoteSetQuantity(ByVal result As UIQuoteResult, ByVal quantity As Long)
+    Dim factor As Double
+    Dim part As UIQuoteComponent
+    Dim i As Long
+    If quantity < 1 Or quantity > 2000 Or result.Quantity < 1 Then
+        Err.Raise vbObjectError + 2400, "UIQuoteSetQuantity", "Quantity must be a whole number from 1 to 2000."
+    End If
+    If quantity = result.Quantity Then Exit Sub
+    factor = quantity / result.Quantity
+    For i = 0 To UBound(result.Components)
+        Set part = result.Components(i)
+        part.Quantity = Round(part.Quantity / result.Quantity, 0) * quantity
+        part.TotalArea = part.TotalArea * factor
+        part.TotalWeight = part.TotalWeight * factor
+        part.TotalMaterialCost = part.TotalMaterialCost * factor
+    Next i
+    result.Quantity = quantity
+    result.TotalArea = result.TotalArea * factor
+    result.TotalWeight = result.TotalWeight * factor
+    result.TotalMaterialCost = result.TotalMaterialCost * factor
+    UINestQuote result, result.PartGap, result.EdgeMargin
+    UIQuotePricing result, result.Painted, result.CutRate, result.BendRate, result.WeldRate, result.PaintRate, result.MarginPercent
+End Sub
 
 ' Standard placeholder rates until time studies are available; editable under Properties.
 Public Function UIQuoteDefaultRate(ByVal name As String) As Double
@@ -320,10 +363,12 @@ Public Function UIQuoteReport(ByVal result As UIQuoteResult) As String
     Dim sides As Double
     Dim part As UIQuoteComponent
     Dim i As Long
-    centers = result.CenterPatternCount * result.CenterWallRuns
-    sides = result.SidePlantersPerWall * result.SideWallRuns
+    centers = result.CenterPatternCount * result.CenterWallRuns * result.Quantity
+    sides = result.SidePlantersPerWall * result.SideWallRuns * result.Quantity
     text = "INPUT-ONLY COMPONENT QUOTE - formula version 3" & vbCrLf & _
-        "No model opened, edited, rebuilt or measured." & vbCrLf & vbCrLf & _
+        "No model opened, edited, rebuilt or measured." & vbCrLf & _
+        "Design: " & result.EstimateLabel & "; quantity: " & result.Quantity & vbCrLf & _
+        "Run counts and dimensions below are per copy; component totals include all copies." & vbCrLf & vbCrLf & _
         "Overall walls: " & result.WallCount & "; orientation: " & result.Orientation & vbCrLf & _
         "Overall L x W x H (in): " & UIInchesText(result.OverallLength) & " x " & _
         UIInchesText(result.OverallWidth) & " x " & UIInchesText(result.Height) & vbCrLf & _
@@ -401,6 +446,7 @@ Public Function UIQuoteSummaryCards(ByVal result As UIQuoteResult) As Variant
         CStr(result.WallCount) & " walls  |  " & result.Orientation & "  |  " & result.ReturnLabel & vbCrLf & _
         "L x W x H: " & FormatNumber(result.OverallLength, 3) & " x " & _
         FormatNumber(result.OverallWidth, 3) & " x " & FormatNumber(result.Height, 3) & " in"
+    If result.Quantity > 1 Then design = design & "  |  Qty: " & result.Quantity & " (all copies included)"
     cards(1, 0) = "Design"
     cards(2, 0) = "Profile weight"
     cards(3, 0) = "Profile area"
@@ -511,10 +557,11 @@ Public Function UIQuoteTotalRows(ByVal result As UIQuoteResult) As Variant
     UIQuoteTotalRows = rows
 End Function
 
-Public Sub UIShowQuote(ByVal result As UIQuoteResult)
+Public Sub UIShowQuote(ByVal result As UIQuoteResult, Optional ByVal allowMargin As Boolean = True)
     Dim report As UserForm_QuoteReport
     Set report = New UserForm_QuoteReport
     report.SetResult result
+    report.SetMarginEditable allowMargin
     report.Show vbModal
     Unload report
 End Sub

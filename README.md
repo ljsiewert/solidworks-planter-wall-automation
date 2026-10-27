@@ -51,6 +51,15 @@ The five original macro sources remain unchanged by the UI integration.
   and utilization percentages. This is not a production cutting plan.
 - Results include a per-sheet **Unused / potential scrap** table and total,
   distinguishing unused stock from material that must be discarded.
+- Quote-only supports **Quantity** and an **Add planter** field-assembly list.
+  Copies of one design nest together; different designs nest separately.
+  Quantity and design name live in the field panel. Select a saved row to edit
+  its inputs and **Save changes**. At least one added row is required to run.
+  **Run field** opens combined pricing with sell-price emphasis, a shared
+  margin spinner, per-design details/layout PDFs and **Preview selected**.
+  Requires the additional [field quote module](src/ui_quote_field.bas) and
+  [field results form](src/UserForm_FieldQuote.frm); see the
+  [installation and usage details](src/README.md#field-assembly-estimates).
 - Preview-only selection updates/rebuilds the unsaved template without
   Pack-and-Go or exports; export choices are cleared and disabled. Close
   without saving and reopen before the next run. Calculated center/side

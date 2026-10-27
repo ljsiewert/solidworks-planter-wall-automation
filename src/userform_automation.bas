@@ -4,6 +4,7 @@ Option Explicit
 ' Import into the SAME VBA project as packngo1, not the exporter projects.
 Public quoteOnly As Boolean
 Public quoteValues As UIQuoteResult
+Public quoteDesigns As Collection
 Public previewOnly As Boolean
 Public exportPDFAssemblies As Boolean
 Public exportPDFComponents As Boolean
@@ -57,13 +58,14 @@ Public Sub RunWithUI()
     On Error GoTo Failed
     uiRunning = True
     Set quoteValues = Nothing
+    Set quoteDesigns = Nothing
     Set form = New UserForm_AutomationUI
     form.Show vbModal
     If form.Accepted Then
         Unload form
         Set form = Nothing
         If quoteOnly Then
-            UIShowQuote quoteValues
+            UIShowFieldQuote quoteDesigns
         Else
             If Not packngo1.Step1_Initialize() Then GoTo Finished
             UIRequireCleanTemplate packngo1.swModel
@@ -83,11 +85,13 @@ Public Sub RunWithUI()
 Finished:
     If Not form Is Nothing Then Unload form
     Set quoteValues = Nothing
+    Set quoteDesigns = Nothing
     uiRunning = False
     Exit Sub
 
 Failed:
-    MsgBox Err.Description, vbCritical, "Planter Automation"
+    MsgBox Err.Description & vbCrLf & "Error " & CStr(Err.Number) & " in " & Err.Source, _
+        vbCritical, "Planter Automation"
     Resume Finished
 End Sub
 
@@ -97,6 +101,49 @@ Public Sub UIDisableExports()
     exportPDFComponents = False
     exportDXF = False
     exportSTEP = False
+End Sub
+
+Public Sub UIPreviewQuoteDesign(ByVal result As UIQuoteResult)
+    Dim previousInputs As Variant
+    Dim previousQuoteOnly As Boolean
+    Dim previousPreviewOnly As Boolean
+    Dim previousOutput As String
+    Dim gauge As String
+    Dim material As String
+    Dim failure As String
+    previousInputs = designTableInputs
+    previousQuoteOnly = quoteOnly
+    previousPreviewOnly = previewOnly
+    previousOutput = outputFolder
+    On Error GoTo Failed
+    If Not packngo1.Step1_Initialize() Then GoTo Finished
+    UIRequireCleanTemplate packngo1.swModel
+    If StrComp(packngo1.GetFileName(packngo1.swModel.GetPathName), _
+               "planter_assembly.SLDASM", vbTextCompare) <> 0 Then
+        Err.Raise UI_ERROR, "UIPreviewQuoteDesign", "Start preview from the original planter_assembly.SLDASM template."
+    End If
+    UIMapSelections result.WallCount, result.Orientation, result.ReturnLabel, result.Material, _
+        IIf(result.Thickness = 0.25, "1/4 inch", "3/16 inch")
+    packngo1.overallLength = CStr(result.OverallLength)
+    packngo1.overallWidth = CStr(result.OverallWidth)
+    packngo1.overallHeight = CStr(result.Height)
+    gauge = IIf(result.Thickness = 0.25, "1/4", "3/16")
+    material = IIf(result.Material = "Mild Steel", "MILD STEEL", "BORCON WEATHERING STEEL")
+    designTableInputs = Array(UIWallTableLabel(result.WallCount, result.Orientation), _
+        UIReturnTableLabel(result.ReturnLabel), result.OverallLength, result.OverallWidth, result.Height, gauge, material, _
+        UIYesNo(result.MountsToPlanter), UIYesNo(result.OverrideBaseWidth), result.BaseWidth)
+    previewOnly = True
+    UIRunPreview
+Finished:
+    designTableInputs = previousInputs
+    quoteOnly = previousQuoteOnly
+    previewOnly = previousPreviewOnly
+    outputFolder = previousOutput
+    Exit Sub
+Failed:
+    failure = Err.Description
+    MsgBox failure, vbExclamation, "Selected Planter Preview"
+    Resume Finished
 End Sub
 
 Private Sub UIRunPreview()
@@ -120,8 +167,8 @@ Private Sub UIRunPreview()
     logPath = runLogger.Path
     UITraceDetail "Preview template", template.GetPathName
     UITraceDetail "Preview configuration", template.ConfigurationManager.ActiveConfiguration.Name
-    For i = 0 To 6
-        UITraceDetail "Input N" & CStr(i + 3), CStr(designTableInputs(i))
+    For i = 0 To 9
+        UITraceDetail "Input " & UITableInputAddress(i), CStr(designTableInputs(i))
     Next i
     plan.Add "Updating preview design table and rebuilding template"
     plan.Add "Verifying preview model and releasing protection"
@@ -228,12 +275,40 @@ Public Sub UIRequireCleanTemplate(ByVal model As SldWorks.ModelDoc2)
     End If
 End Sub
 
-Public Sub UIValidateDimensions(ByVal length As Double, ByVal width As Double, ByVal height As Double)
+Public Function UIYesNo(ByVal flag As Boolean) As String
+    If flag Then UIYesNo = "YES" Else UIYesNo = "NO"
+End Function
+
+' Design table input cells: rows 3-9 are the original inputs, rows 13-15 are the mounting/baseplate options.
+Public Function UITableInputAddress(ByVal index As Long) As String
+    If index >= 0 And index <= 6 Then
+        UITableInputAddress = "Q" & CStr(index + 3)
+    ElseIf index >= 7 And index <= 9 Then
+        UITableInputAddress = "Q" & CStr(index + 6)
+    Else
+        Err.Raise UI_ERROR, "UITableInputAddress", "Unknown design table input."
+    End If
+End Function
+
+Public Sub UIValidateBaseWidth(ByVal overrideWidth As Boolean, ByVal baseWidth As Double)
+    If overrideWidth And (baseWidth <= 0 Or baseWidth > 100) Then
+        Err.Raise UI_ERROR, "UIValidateBaseWidth", "Baseplate width must be greater than 0 and no more than 100 inches."
+    End If
+End Sub
+
+Public Sub UIValidateDimensions(ByVal length As Double, ByVal width As Double, ByVal height As Double, ByVal walls As Long)
     If height < 6 Or height > 48 Then
         Err.Raise UI_ERROR, "UIValidateDimensions", "Height must be between 6 and 48 inches, inclusive."
     End If
-    If length < 6 Or width < 6 Or length <= height Or width <= height Then
-        Err.Raise UI_ERROR, "UIValidateDimensions", "Length and width must each be greater than height and at least 6 inches."
+    If length < 6 Or width < 6 Then
+        Err.Raise UI_ERROR, "UIValidateDimensions", "Length and width must each be at least 6 inches."
+    End If
+    ' Open sides relax the height rule: 3 walls free the width, 1 or 2 walls free both.
+    If walls >= 3 And length <= height Then
+        Err.Raise UI_ERROR, "UIValidateDimensions", "Length must be greater than height."
+    End If
+    If walls >= 4 And width <= height Then
+        Err.Raise UI_ERROR, "UIValidateDimensions", "With 4 walls, width must be greater than height."
     End If
 End Sub
 
@@ -390,6 +465,26 @@ Private Sub UIRequireMacro(ByVal name As String)
     End If
 End Sub
 
+' Matches only the equation that defines the variable, not equations that merely reference it.
+Public Function UIGlobalValue(ByVal manager As SldWorks.EquationMgr, ByVal variableName As String) As String
+    Dim i As Long
+    Dim equationText As String
+    Dim target As String
+    target = """" & variableName & """"
+    For i = 0 To manager.GetCount - 1
+        If manager.GlobalVariable(i) Then
+            equationText = Trim$(manager.Equation(i))
+            If StrComp(Left$(equationText, Len(target)), target, vbTextCompare) = 0 Then
+                If Left$(LTrim$(Mid$(equationText, Len(target) + 1)), 1) = "=" Then
+                    UIGlobalValue = CStr(manager.Value(i))
+                    Exit Function
+                End If
+            End If
+        End If
+    Next i
+    UIGlobalValue = "ERROR"
+End Function
+
 Public Sub UIVerifyDesignTableModel(ByVal model As SldWorks.ModelDoc2, ByVal expected As Variant)
     Dim names As Variant
     Dim manager As SldWorks.EquationMgr
@@ -398,14 +493,15 @@ Public Sub UIVerifyDesignTableModel(ByVal model As SldWorks.ModelDoc2, ByVal exp
     Dim actual As String
     names = Array("WALL_COUNT", "SIDE", "RETURN_TYPE", "OVERALL_LENGTH", _
                   "OVERALL_WIDTH", "OVERALL_HEIGHT", "CENTER_PLANTER_LENGTH", _
-                  "SIDE_PLANTER_LENGTH", "OVERALL_MATERIAL", "OVERALL_THICKNESS")
+                  "SIDE_PLANTER_LENGTH", "OVERALL_MATERIAL", "OVERALL_THICKNESS", _
+                  "DEPTH_OVERRIDE", "CONTINUATION", "DEPTH_OVERRIDE_DIMENSION")
     units = model.GetUnits
     If units(0) <> swLengthUnit_e.swINCHES Then
         Err.Raise UI_ERROR, "UIVerifyModel", "The supplied design table requires document length units of inches."
     End If
     Set manager = model.GetEquationMgr
     For i = LBound(names) To UBound(names)
-        actual = packngo1.GetGlobalVariable(manager, CStr(names(i)))
+        actual = UIGlobalValue(manager, CStr(names(i)))
         If actual = "ERROR" Then
             Err.Raise UI_ERROR, "UIVerifyModel", "Cannot read model global: " & CStr(names(i))
         End If
@@ -434,6 +530,17 @@ Private Sub UIReadCalculatedGlobals(ByVal model As SldWorks.ModelDoc2, ByVal exp
         Err.Raise UI_ERROR, "UIReadCalculatedGlobals", "The table thickness calculation does not match the selected thickness."
     End If
     UIVerifyDesignTableModel model, expected
+    If CDbl(expected(10)) <> IIf(designTableInputs(8) = "YES", 1, 0) Then
+        Err.Raise UI_ERROR, "UIReadCalculatedGlobals", "The table baseplate-width override does not match the selection."
+    End If
+    If CDbl(expected(11)) <> IIf(designTableInputs(7) = "YES", 1, 0) Then
+        Err.Raise UI_ERROR, "UIReadCalculatedGlobals", "The table mounting option does not match the selection."
+    End If
+    If designTableInputs(8) = "YES" Then
+        If Abs(CDbl(expected(12)) - 2 * (CDbl(designTableInputs(9)) + CDbl(expected(9)))) > 0.000001 Then
+            Err.Raise UI_ERROR, "UIReadCalculatedGlobals", "The table baseplate width does not match twice the entered value plus thickness."
+        End If
+    End If
     Set packngo1.swEqMgr = model.GetEquationMgr
     ' R8 is the naming code; K3 drives physical thickness, not THICKNESS_LABEL.
     packngo1.centerPlanterLength = CStr(expected(6))
@@ -596,8 +703,8 @@ Private Sub UIRunAutomation()
     UITraceDetail "Template", templatePath
     UITraceDetail "SolidWorks revision", packngo1.swApp.RevisionNumber
     UITraceDetail "Output parent", outputFolder
-    For inputIndex = 0 To 6
-        UITraceDetail "Input N" & CStr(inputIndex + 3), CStr(designTableInputs(inputIndex))
+    For inputIndex = 0 To 9
+        UITraceDetail "Input " & UITableInputAddress(inputIndex), CStr(designTableInputs(inputIndex))
     Next inputIndex
     UITraceDetail "Exports", "Quote=" & CStr(quoteOnly) & "; DXF=" & CStr(exportDXF) & _
         "; STEP=" & CStr(exportSTEP) & "; PDF assemblies=" & CStr(exportPDFAssemblies) & _

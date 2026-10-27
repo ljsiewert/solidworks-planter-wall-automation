@@ -227,6 +227,7 @@ Public Sub SetResult(ByVal result As UIQuoteResult)
     Dim y As Single
     Dim i As Long
     Set quoteResult = result
+    If Len(result.EstimateLabel) > 0 Then Me.Caption = "Planter Estimate - " & result.EstimateLabel & " (Qty " & result.Quantity & ")"
     pdfButton.Enabled = result.NestAvailable
     cards = UIQuoteSummaryCards(result)
     headlineCaption.Caption = cards(0, 0)
@@ -277,6 +278,12 @@ Public Sub SetResult(ByVal result As UIQuoteResult)
         FillTable sheetBox, sheetRows, Array(80, 60, 120, 220, 110, 130), sheetTitle.Top + 32, 508 - (sheetTitle.Top + 32)
         nestWarningLabel.Visible = False
     End If
+End Sub
+
+Public Sub SetMarginEditable(ByVal editable As Boolean)
+    marginBox.Enabled = editable And quoteResult.HasPricing
+    marginSpin.Enabled = editable And quoteResult.HasPricing
+    If Not editable Then marginBox.ControlTipText = "Margin applies to every design; change it on the field assembly results."
 End Sub
 
 ' Recomputes sell price from the edited margin; invalid entries leave the last valid price shown.

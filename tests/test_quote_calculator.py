@@ -113,11 +113,12 @@ class QuoteTests(unittest.TestCase):
         self.assertLess(entry.index("form.Show vbModal"), entry.index("Step1_Initialize"))
         self.assertLess(entry.index("If quoteOnly Then"), entry.index("Step1_Initialize"))
         self.assertNotIn("Step2_ReadGlobals", entry)
-        quote = FORM.split("If quoteOnly Then", 1)[1].split("End If", 1)[0]
+        quote = FORM.split("Private Function ReadQuoteDesign()", 1)[1].split("End Function", 1)[0]
         self.assertIn("UICalculateQuote", quote)
-        self.assertIn("Exit Sub", quote)
+        self.assertIn("Exit Function", quote)
+        run = FORM.split("Private Sub runButton_Click()", 1)[1].split("End Sub", 1)[0]
         for flag in ("exportPDFAssemblies", "exportPDFComponents", "exportDXF", "exportSTEP"):
-            self.assertIn(flag + " = False", quote)
+            self.assertIn(flag + " = False", run)
         for forbidden in ("packngo1", "SldWorks", "UIDesignTableSession", "CreateObject",
                           "OpenDoc", "Save", "Excel", "runLogger"):
             self.assertNotIn(forbidden, CALCULATOR)
@@ -125,7 +126,7 @@ class QuoteTests(unittest.TestCase):
         self.assertIn('AddPropertyText("txtPricePerPound", "Quote material ($/lb)", 40, "0.90")', FORM)
         self.assertIn('priceBox.Text = "0.90"', FORM)
         self.assertIn("typical range 0-0.25 in", FORM)
-        self.assertIn("UIQuotePricing quoteValues, CBool(paintedToggle.Value)", quote)
+        self.assertIn("UIQuotePricing result, CBool(paintedToggle.Value)", quote)
         self.assertIn('"Forms.ToggleButton.1", "tglPainted"', FORM)
         self.assertIn('AddButton("cmdProperties", "Properties..."', FORM)
         for box in ("txtCutRate", "txtBendRate", "txtWeldRate", "txtPaintRate", "txtQuoteMargin",
@@ -139,6 +140,44 @@ class QuoteTests(unittest.TestCase):
         self.assertIn("UIQuoteParsePrice = UIParseInches(text)", CALCULATOR)
         self.assertIn("no currency symbol or commas", CALCULATOR)
         self.assertIn("Optional ByVal pricePerPound As Double = 0.9", CALCULATOR)
+
+    def test_field_assembly_wiring(self):
+        field_form = (ROOT / "src" / "UserForm_FieldQuote.frm").read_text(encoding="ascii")
+        self.assertIn('Me.Controls.Add("Forms.TextBox.1", "txtQuantity", True)', FORM)
+        self.assertNotIn('AddText("txtQuantity"', FORM)
+        self.assertIn("quantityBox.Enabled = quoteBox.Value", FORM)
+        self.assertIn("fieldDesigns.Add result", FORM)
+        self.assertIn("fieldDesigns.Remove planterList.ListIndex + 1", FORM)
+        self.assertIn("Set quoteDesigns = fieldDesigns", FORM)
+        self.assertIn("UIQuoteSetQuantity result, quantity", FORM)
+        self.assertIn("UIShowFieldQuote quoteDesigns", MODULE)
+        self.assertEqual(MODULE.count("Set quoteDesigns = Nothing"), 2)
+        run = FORM.split("Private Sub runButton_Click()", 1)[1].split("End Sub", 1)[0]
+        self.assertLess(run.index("Set quoteDesigns = fieldDesigns"), run.index("UIValidateSelections"))
+        self.assertIn('If fieldDesigns.Count = 0 Then', run)
+        self.assertNotIn("UICalculateQuote", run)
+        self.assertIn("UIFieldQuoteTotals(designs)", field_form)
+        self.assertIn("UIShowQuote result, False\n    RefreshTotals", field_form)
+        self.assertIn("UIFieldSetMargin designs, margin", field_form)
+        self.assertIn("Private WithEvents marginSpin As MSForms.SpinButton", field_form)
+        self.assertNotIn("marginButton", field_form)
+        self.assertIn("mPreviewDesignIndex = designList.ListIndex + 1", field_form)
+        self.assertIn("Public Property Get PreviewDesignIndex() As Long", field_form)
+        self.assertIn("FIELD TOTALS WITHHELD", field_form)
+        self.assertIn('widths = Array(360, 55, 65, 120, 130)', field_form)
+        self.assertIn("label.Left = x + 3", field_form)
+        self.assertIn("x = x + widths(i)", field_form)
+        self.assertIn(".ColumnWidths = columnWidths", field_form)
+        self.assertNotIn('"lblFieldColumns"', field_form)
+
+    def test_pdf_quantity_line_clears_summary_cards(self):
+        quantity_y = float(re.search(
+            r'UIPDFStyledText\(36, (\d+), 9, result.EstimateLabel', PDF)[1])
+        card = re.search(r"Private Function UIPDFCard\b.*?End Function", PDF, re.DOTALL)[0]
+        bottom, height = map(float, re.search(r"UIPDFRect\(x, (\d+), 171, (\d+),", card).groups())
+        caption_y = float(re.search(r"UIPDFStyledText\(x \+ 14, (\d+), 8.5, caption", card)[1])
+        self.assertGreaterEqual(quantity_y - (bottom + height), 12)
+        self.assertGreaterEqual(bottom + height - caption_y, 12)
 
     @unittest.skipUnless(shutil.which("cscript"), "Windows Script Host required")
     def test_calculated_values_boundaries_and_report(self):
@@ -229,6 +268,11 @@ End Class
             script += procedure(CALCULATOR, name) + "\n"
         for name in ("UIValidateSelections", "UIValidateDimensions", "UIInchesText", "UIParseInches"):
             script += procedure(MODULE, name) + "\n"
+        for name in ("UIQuoteParseQuantity", "UIQuoteSetQuantity"):
+            script += procedure(CALCULATOR, name) + "\n"
+        field = (ROOT / "src" / "ui_quote_field.bas").read_text(encoding="ascii")
+        script += procedure(field, "UIFieldQuoteTotals").replace(
+            " As Collection", "").replace("For Each result In designs", "For Each result In designs.Items") + "\n"
         script += procedure(CALCULATOR, "UIQuoteParsePrice") + "\n"
         for name in ("UINestQuote", "UINestSort", "UINestMax", "UINestPack", "UINestMaxRects",
                      "UINestFreeAdd", "UINestFreePrune", "UINestReport", "UINestBuildItems",
@@ -239,6 +283,69 @@ End Class
                      "UIPDFStep", "UIPDFFact", "UIPDFParts", "UIPDFPartCounts", "UIPDFPartLabel", "UISaveQuoteLayoutPDF", "UIPreviewQuoteLayoutPDF"):
             script += procedure(PDF, name) + "\n"
         script += r'''
+Dim copies, fieldDesigns, fieldTotals, baseSheets, basePaint, baseLabor, baseArea, baseQuantity
+Set copies = UICalculateQuote(1, "N/A", "No return", "Mild Steel", "1/4 inch", 36, 24, 12)
+UIQuotePricing copies, True, 75, 5, 10, 2.5, 50
+baseArea = copies.TotalArea
+basePaint = copies.PaintCost
+baseQuantity = copies.WeldedParts
+baseSheets = copies.SheetCount
+UIQuoteSetQuantity copies, 3
+Assert copies.Quantity = 3 And Abs(copies.TotalArea - baseArea * 3) < 0.000001, "Quantity scales profile totals"
+Assert copies.WeldedParts = baseQuantity * 3 And copies.WeldCost = 10 * baseQuantity * 3, "Quantity scales physical parts and welding"
+Assert Abs(copies.PaintCost - basePaint * 3) < 0.000001, "Quantity scales both-sided paint"
+Assert copies.SheetCount <= baseSheets * 3 And copies.CutCost = 75 * copies.SheetCount, "All copies re-nested and cutting priced on actual sheets"
+CheckNest copies
+Assert InStr(UIQuoteReport(copies), "quantity: 3") > 0, "Technical report identifies quantity"
+Assert InStr(UIQuoteLayoutPDF(copies), "Quantity: 3") > 0, "PDF identifies quantity"
+Assert InStr(UIQuoteReport(copies), "Derived center planter total: " & UIInchesText(3)) > 0, "Derived counts include copies"
+UIQuoteSetQuantity copies, 2
+Assert copies.Quantity = 2 And Abs(copies.TotalArea - baseArea * 2) < 0.000001, "Quantity changes are absolute, not compounded"
+CheckNest copies
+UIQuoteSetQuantity copies, 1
+Assert copies.WeldedParts = baseQuantity And Abs(copies.TotalArea - baseArea) < 0.000001, "Restoring one copy preserves original totals"
+On Error Resume Next
+UIQuoteSetQuantity copies, 0
+code = Err.Number
+Err.Clear
+On Error GoTo 0
+Assert code <> 0 And copies.Quantity = 1, "Invalid quantity leaves result unchanged"
+UIQuoteSetQuantity copies, 2000
+Assert Not copies.HasPricing And Not copies.NestAvailable And InStr(copies.NestStatus, "2000 physical components") > 0, "Physical component cap applies after multiplying copies"
+UIQuoteSetQuantity copies, 1
+Assert copies.HasPricing, "Returning to a supported quantity restores pricing"
+Assert UIQuoteParseQuantity(" 2 ") = 2 And UIQuoteParseQuantity("2000") = 2000, "Whole-number quantity boundaries"
+For Each price In Array("", "0", "-1", "1.5", "1e2", "2,000", "2001", "99999", "two")
+    On Error Resume Next
+    i = UIQuoteParseQuantity(CStr(price))
+    code = Err.Number
+    Err.Clear
+    On Error GoTo 0
+    Assert code <> 0, "Invalid quantity rejected: " & price
+Next
+Set fieldDesigns = CreateObject("Scripting.Dictionary")
+fieldDesigns.Add "A", copies
+Set other = UICalculateQuote(1, "N/A", "No return", "Borcon Weathering Steel", "3/16 inch", 48, 24, 12)
+UIQuoteSetQuantity other, 2
+fieldDesigns.Add "B", other
+fieldTotals = UIFieldQuoteTotals(fieldDesigns)
+Assert fieldTotals(8) And fieldTotals(0) = 3, "Field totals include all planter copies"
+Assert fieldTotals(1) = copies.SheetCount + other.SheetCount, "Separate designs keep separate sheet counts"
+Assert Abs(fieldTotals(5) - copies.TotalCost - other.TotalCost) < 0.000001, "Field total cost sums designs"
+Assert Abs(fieldTotals(7) - copies.SellPrice - other.SellPrice) < 0.000001, "Field sell price sums designs"
+UIQuoteSetMargin copies, 40
+fieldTotals = UIFieldQuoteTotals(fieldDesigns)
+Assert Abs(fieldTotals(7) - copies.SellPrice - other.SellPrice) < 0.000001, "Field totals reflect design margin edits"
+other.HasPricing = False
+fieldTotals = UIFieldQuoteTotals(fieldDesigns)
+Assert Not fieldTotals(8), "Unpriced design withholds complete field totals"
+fieldDesigns.RemoveAll
+On Error Resume Next
+fieldTotals = UIFieldQuoteTotals(fieldDesigns)
+code = Err.Number
+Err.Clear
+On Error GoTo 0
+Assert code <> 0, "Empty field quote rejected"
 Function UICalculateQuote(walls, orient, ret, material, thickness, length, width, height)
     Set UICalculateQuote = UIQuoteWithPrice(walls, orient, ret, material, thickness, length, width, height, 0.9, 0.25, 0.25)
 End Function

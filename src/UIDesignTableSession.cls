@@ -10,6 +10,10 @@ Attribute VB_Exposed = False
 Option Explicit
 
 Private Const TABLE_ERROR As Long = vbObjectError + 2200
+Private Const INPUT_COUNT As Long = 10
+Private Const OUTPUT_COUNT As Long = 13
+Private Const LABEL_COLUMN As Long = 16
+Private Const VALUE_COLUMN As Long = 17
 Private model As SldWorks.ModelDoc2
 Private table As SldWorks.DesignTable
 Private sheet As Object
@@ -50,11 +54,11 @@ Public Sub Apply(ByVal document As SldWorks.ModelDoc2, ByVal inputs As Variant, 
     UITraceBegin "Excel initial Calculate"
     sheet.Calculate
     UITraceEnd "Excel initial Calculate"
-    protectedFormulas = Array(sheet.Range("C3:L3").Formula, sheet.Range("N10:N11").Formula)
+    protectedFormulas = Array(sheet.Range("C3:O3").Formula, sheet.Range("Q10:Q11").Formula)
     ' Prevent Excel from interpreting the fractional thickness label as a date.
-    sheet.Range("N8").NumberFormat = "@"
-    For i = 0 To 6
-        sheet.Cells(i + 3, 14).Value2 = inputs(i)
+    sheet.Range("Q8").NumberFormat = "@"
+    For i = 0 To INPUT_COUNT - 1
+        If InputIsWritten(inputs, i) Then sheet.Cells(InputRow(i), VALUE_COLUMN).Value2 = inputs(i)
     Next i
     UITraceBegin "Excel input Calculate"
     sheet.Calculate
@@ -72,6 +76,15 @@ Public Sub CloseEditor()
     If table Is Nothing Then Exit Sub
     If table.IsActive Then CloseSheet swDesignTableUpdateOptions_e.swUpdateDesignTableNone
 End Sub
+
+Private Function InputRow(ByVal index As Long) As Long
+    If index <= 6 Then InputRow = index + 3 Else InputRow = index + 6
+End Function
+
+' The new baseplate width is only sent when the override is YES; otherwise the sheet value is left alone.
+Private Function InputIsWritten(ByVal inputs As Variant, ByVal index As Long) As Boolean
+    InputIsWritten = (index <> 9) Or (CStr(inputs(8)) = "YES")
+End Function
 
 Private Sub OpenSheet()
     UITraceBegin "Open embedded design table"
@@ -136,46 +149,58 @@ Private Sub ValidateLayout()
         "$VALUE@OVERALL_LENGTH@Equations", "$VALUE@OVERALL_WIDTH@Equations", _
         "$VALUE@OVERALL_HEIGHT@Equations", "$VALUE@RETURN_TYPE@Equations", _
         "$VALUE@CENTER_PLANTER_LENGTH@Equations", "$VALUE@SIDE_PLANTER_LENGTH@Equations", _
-        "$VALUE@OVERALL_THICKNESS@Equations", "$VALUE@OVERALL_MATERIAL@Equations")
+        "$VALUE@OVERALL_THICKNESS@Equations", "$VALUE@OVERALL_MATERIAL@Equations", _
+        "$VALUE@DEPTH_OVERRIDE@Equations", "$VALUE@CONTINUATION@Equations", _
+        "$VALUE@DEPTH_OVERRIDE_DIMENSION@Equations")
     labels = Array("WALL COUNT:", "RETURN TYPE:", "OVERALL LENGTH:", "OVERALL WIDTH:", _
-                   "OVERALL HEIGHT:", "OVERALL THICKNESS:", "OVERALL MATERIAL:")
+                   "OVERALL HEIGHT:", "OVERALL THICKNESS:", "OVERALL MATERIAL:", _
+                   "DOES THIS PLANTER MOUNT TO ANOTHER PLANTER?", "DO YOU WANT TO OVERRIDE BASEPLATE WIDTH?", _
+                   "BASEPLATE WIDTH NEW VALUE:")
     For i = 0 To UBound(headers)
         If StrComp(CStr(sheet.Cells(2, i + 2).Value2), CStr(headers(i)), vbTextCompare) <> 0 Then
             Err.Raise TABLE_ERROR, "UIDesignTableSession", "Unexpected design table header in row 2, column " & CStr(i + 2)
         End If
     Next i
-    For i = 0 To 6
-        If CStr(sheet.Cells(i + 3, 13).Value2) <> labels(i) Then
-            Err.Raise TABLE_ERROR, "UIDesignTableSession", "Unexpected input label at M" & CStr(i + 3)
+    For i = 0 To INPUT_COUNT - 1
+        If Squash(CStr(sheet.Cells(InputRow(i), LABEL_COLUMN).Value2)) <> labels(i) Then
+            Err.Raise TABLE_ERROR, "UIDesignTableSession", "Unexpected input label at P" & CStr(InputRow(i))
         End If
-        If sheet.Cells(i + 3, 14).HasFormula Then
-            Err.Raise TABLE_ERROR, "UIDesignTableSession", "Input N" & CStr(i + 3) & " is a formula; refusing to overwrite it."
+        If sheet.Cells(InputRow(i), VALUE_COLUMN).HasFormula Then
+            Err.Raise TABLE_ERROR, "UIDesignTableSession", "Input Q" & CStr(InputRow(i)) & " is a formula; refusing to overwrite it."
         End If
     Next i
     If StrComp(CStr(sheet.Range("A3").Value2), configurationName, vbTextCompare) <> 0 Then
         Err.Raise TABLE_ERROR, "UIDesignTableSession", _
             "Select the design table's configuration before running: " & CStr(sheet.Range("A3").Value2)
     End If
-    For Each address In Array("C3", "D3", "E3", "F3", "G3", "H3", "I3", "J3", "K3", "L3", "N10", "N11")
+    For Each address In Array("C3", "D3", "E3", "F3", "G3", "H3", "I3", "J3", "K3", "L3", "M3", "N3", "O3", "Q10", "Q11")
         If Not sheet.Range(CStr(address)).HasFormula Then
             Err.Raise TABLE_ERROR, "UIDesignTableSession", "Expected a calculated formula at " & CStr(address)
         End If
     Next address
 End Sub
 
+Private Function Squash(ByVal text As String) As String
+    text = Trim$(text)
+    Do While InStr(text, "  ") > 0
+        text = Replace(text, "  ", " ")
+    Loop
+    Squash = text
+End Function
+
 Private Sub VerifyFormulas()
     Dim actual As Variant
     Dim saved As Variant
     Dim i As Long
 
-    actual = sheet.Range("C3:L3").Formula
+    actual = sheet.Range("C3:O3").Formula
     saved = protectedFormulas(0)
-    For i = 1 To 10
+    For i = 1 To 13
         If actual(1, i) <> saved(1, i) Then
             Err.Raise TABLE_ERROR, "UIDesignTableSession", "A design table output formula changed."
         End If
     Next i
-    actual = sheet.Range("N10:N11").Formula
+    actual = sheet.Range("Q10:Q11").Formula
     saved = protectedFormulas(1)
     For i = 1 To 2
         If actual(i, 1) <> saved(i, 1) Then
@@ -186,20 +211,22 @@ End Sub
 
 Private Sub VerifyInputs(ByVal expected As Variant)
     Dim i As Long
-    For i = 0 To 6
-        If CStr(sheet.Cells(i + 3, 14).Value2) <> CStr(expected(i)) Then
-            Err.Raise TABLE_ERROR, "UIDesignTableSession", "Excel did not retain input N" & CStr(i + 3)
+    For i = 0 To INPUT_COUNT - 1
+        If InputIsWritten(expected, i) Then
+            If CStr(sheet.Cells(InputRow(i), VALUE_COLUMN).Value2) <> CStr(expected(i)) Then
+                Err.Raise TABLE_ERROR, "UIDesignTableSession", "Excel did not retain input Q" & CStr(InputRow(i))
+            End If
         End If
     Next i
 End Sub
 
 Private Function ReadOutputs() As Variant
     Dim addresses As Variant
-    Dim values(0 To 9) As Double
+    Dim values(0 To OUTPUT_COUNT - 1) As Double
     Dim i As Long
 
-    addresses = Array("D3", "C3", "H3", "E3", "F3", "G3", "I3", "J3", "L3", "K3")
-    For i = 0 To 9
+    addresses = Array("D3", "C3", "H3", "E3", "F3", "G3", "I3", "J3", "L3", "K3", "M3", "N3", "O3")
+    For i = 0 To OUTPUT_COUNT - 1
         values(i) = UIReadTableNumber(sheet.Range(CStr(addresses(i))).Value2, CStr(addresses(i)))
     Next i
     ReadOutputs = values

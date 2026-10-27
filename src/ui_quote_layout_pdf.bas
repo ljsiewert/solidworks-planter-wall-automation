@@ -90,6 +90,10 @@ Private Function UIPDFSummary(ByVal result As UIQuoteResult) As String
     text = text & UIPDFStyledText(36, 516, 10, "Design: " & result.WallCount & " walls | " & result.Orientation & " | " & _
         result.ReturnLabel & " | L x W x H: " & UIInchesText(result.OverallLength) & " x " & _
         UIInchesText(result.OverallWidth) & " x " & UIInchesText(result.Height) & " in", False, gray)
+    If result.Quantity > 1 Or Len(result.EstimateLabel) > 0 Then
+        text = text & UIPDFStyledText(36, 502, 9, result.EstimateLabel & " | Quantity: " & result.Quantity & _
+            " | Parts, sheets and areas include all copies of this design.", True, navy)
+    End If
     text = text & UIPDFCard(36, "SHEETS REQUIRED", CStr(result.SheetCount), _
         "Area-only minimum: " & result.AreaMinimumSheets & " sheets", navy)
     text = text & UIPDFCard(219, "SHEET UTILIZATION", Format$(result.UtilizationPercent, "0.00") & "%", _
@@ -197,8 +201,8 @@ End Function
 
 Private Function UIPDFCard(ByVal x As Double, ByVal caption As String, ByVal value As String, _
     ByVal detail As String, ByVal color As String) As String
-    UIPDFCard = UIPDFRect(x, 418, 171, 84, "0.929 0.949 0.973") & UIPDFRect(x, 418, 4, 84, color) & _
-        UIPDFStyledText(x + 14, 484, 8.5, caption, True, "0.35 0.35 0.35") & _
+    UIPDFCard = UIPDFRect(x, 418, 171, 72, "0.929 0.949 0.973") & UIPDFRect(x, 418, 4, 72, color) & _
+        UIPDFStyledText(x + 14, 472, 8.5, caption, True, "0.35 0.35 0.35") & _
         UIPDFStyledText(x + 14, 450, 22, value, True, color) & _
         UIPDFStyledText(x + 14, 428, 9, detail, False, "0.35 0.35 0.35")
 End Function
