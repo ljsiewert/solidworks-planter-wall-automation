@@ -9,7 +9,7 @@ Public Function UICalculateQuote(ByVal walls As Long, ByVal orientation As Strin
     Dim result As UIQuoteResult
     Dim available As Double
     UIValidateSelections walls, orientation, returnLabel, material, thicknessLabel
-    UIValidateDimensions length, width, height
+    UIValidateDimensions length, width, height, walls
     If pricePerPound <= 0 Then
         Err.Raise vbObjectError + 2400, "UICalculateQuote", "Material price must be greater than zero dollars per lb."
     End If

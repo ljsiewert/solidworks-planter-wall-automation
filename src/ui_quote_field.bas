@@ -3,16 +3,17 @@ Option Explicit
 
 Public Sub UIShowFieldQuote(ByVal designs As Collection)
     Dim report As UserForm_FieldQuote
-    Dim selected As UIQuoteResult
+    Dim previewIndex As Long
     Set report = New UserForm_FieldQuote
     report.SetDesigns designs
     Do
         report.Show vbModal
-        Set selected = report.PreviewDesign
-        If selected Is Nothing Then Exit Do
-        UIPreviewQuoteDesign selected
+        previewIndex = report.PreviewDesignIndex
+        If previewIndex < 1 Or previewIndex > designs.Count Then Exit Do
+        UIPreviewQuoteDesign designs(previewIndex)
     Loop
     Unload report
+    Set report = Nothing
 End Sub
 
 Public Sub UIFieldReplaceDesign(ByVal designs As Collection, ByVal index As Long, ByVal result As UIQuoteResult)

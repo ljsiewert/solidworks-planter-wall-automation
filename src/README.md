@@ -318,6 +318,7 @@ input is shown in red with a last-valid-price notice.
 
 **Preview selected** hides the field results while running the same guarded
 preview workflow as the input UI for **one copy** of the selected design.
+The field results UserForm instance remains loaded and is reused after preview.
 The original, clean `planter_assembly.SLDASM` must be active. Preview updates
 the unsaved template only; it creates no Pack-and-Go copies or exports, and
 does not modify quote quantities or prices. The field results return after the
@@ -739,7 +740,9 @@ Existing helper/output formulas and thickness/material rules are preserved.
 Enter the three overall dimensions as decimal **inches**, such as `100.25`,
 not fractions, unit suffixes, scientific notation or comma decimals. The
 workbook's actual data validations allow **6 <= height <= 48**, with length
-and width each at least 6 and strictly greater than height. Those formulas,
+and width each at least 6. Length must exceed height with 3 or 4 walls, and
+width must exceed height only with 4 walls (1 or 2 walls may be shorter than
+the height). The workbook formulas,
 not the more restrictive text notes in column O, define UI validation.
 The template's document length units must be inches.
 Naming continues to use the existing `FormatPNDimension` rounding.

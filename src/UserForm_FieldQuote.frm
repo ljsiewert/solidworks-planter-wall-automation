@@ -11,11 +11,11 @@ Private designList As MSForms.ListBox
 Private summaryLabel As MSForms.Label
 Private sellCaption As MSForms.Label
 Private metricValues(0 To 6) As MSForms.Label
-Private previewResult As UIQuoteResult
+Private mPreviewDesignIndex As Long
 Private updatingMargin As Boolean
 
-Public Property Get PreviewDesign() As UIQuoteResult
-    Set PreviewDesign = previewResult
+Public Property Get PreviewDesignIndex() As Long
+    PreviewDesignIndex = mPreviewDesignIndex
 End Property
 
 Private Sub UserForm_Initialize()
@@ -273,16 +273,16 @@ Private Sub previewButton_Click()
         MsgBox "Select a planter design first.", vbExclamation, "Field Assembly"
         Exit Sub
     End If
-    Set previewResult = designs(designList.ListIndex + 1)
+    mPreviewDesignIndex = designList.ListIndex + 1
     Me.Hide
 End Sub
 
 Private Sub UserForm_Activate()
-    Set previewResult = Nothing
+    mPreviewDesignIndex = 0
 End Sub
 
 Private Sub closeButton_Click()
-    Set previewResult = Nothing
+    mPreviewDesignIndex = 0
     Me.Hide
 End Sub
 

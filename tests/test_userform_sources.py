@@ -75,8 +75,8 @@ class SourceContracts(unittest.TestCase):
         self.assertIn("Public Sub CloseEditor()", TABLE)
         self.assertNotIn("Public Sub Restore()", TABLE)
         self.assertNotIn("originals", TABLE)
-        self.assertIn('sheet.Cells(i + 3, 14).Value2 = inputs(i)', TABLE)
-        self.assertIn('sheet.Range("N8").NumberFormat = "@"', TABLE)
+        self.assertIn('sheet.Cells(InputRow(i), VALUE_COLUMN).Value2 = inputs(i)', TABLE)
+        self.assertIn('sheet.Range("Q8").NumberFormat = "@"', TABLE)
         self.assertIn("sheet.Calculate", TABLE)
         self.assertIn("VerifyFormulas", TABLE)
         self.assertIn("If table.LinkToFile Then", TABLE)
@@ -314,7 +314,7 @@ WScript.Echo "PASS: already-active, switched, failed-switch and failed-rebuild p
     def test_validation_mappings_and_output_paths(self):
         helpers = "\n\n".join(helper_body(name) for name in (
             "UIParseInches", "UIValidateSelections", "UIMapSelections", "UIOutputRoot",
-            "UIValidateDimensions", "UIWallTableLabel", "UIReturnTableLabel", "UIReadTableNumber",
+            "UIValidateDimensions", "UIYesNo", "UITableInputAddress", "UIValidateBaseWidth", "UIWallTableLabel", "UIReturnTableLabel", "UIReadTableNumber",
             "UIProgressTime",
         ))
         helpers += "\n\n" + "\n\n".join(helper_body(name, PACKNGO) for name in (
@@ -433,8 +433,16 @@ Assert UIReadTableNumber("=113", "N10") = 113, "Calculated string value"
 Assert UIReadTableNumber("=100.4", "N11") = 100.4, "Calculated side value"
 Assert UIReadTableNumber("=0", "C3") = 0, "Zero orientation"
 Assert UIReadTableNumber(0.1875, "K3") = 0.1875, "Numeric thickness"
-UIValidateDimensions 60, 60, 6
-UIValidateDimensions 60, 60, 48
+UIValidateDimensions 60, 60, 6, 4
+Assert UIYesNo(True) = "YES" And UIYesNo(False) = "NO", "Yes/no flags"
+Assert UITableInputAddress(6) = "Q9" And UITableInputAddress(7) = "Q13" And UITableInputAddress(9) = "Q15", "Input cells"
+UIValidateBaseWidth False, 0
+UIValidateBaseWidth True, 7.5
+UIValidateDimensions 60, 60, 48, 4
+UIValidateDimensions 60, 12, 27, 3
+UIValidateDimensions 12, 12, 27, 2
+UIValidateDimensions 12, 12, 27, 1
+ExpectBadDimensions 12, 12, 27
 ExpectBadDimensions 60, 60, 5.999
 ExpectBadDimensions 60, 60, 48.001
 ExpectBadDimensions 48, 60, 48

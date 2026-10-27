@@ -17,6 +17,10 @@ Private WithEvents removePlanterButton As MSForms.CommandButton
 Private WithEvents updatePlanterButton As MSForms.CommandButton
 Private WithEvents newPlanterButton As MSForms.CommandButton
 Private WithEvents planterList As MSForms.ListBox
+Private WithEvents overrideBox As MSForms.CheckBox
+
+Private mountBox As MSForms.CheckBox
+Private baseWidthBox As MSForms.TextBox
 
 Private quantityBox As MSForms.TextBox
 Private designNameBox As MSForms.TextBox
@@ -56,7 +60,7 @@ Private Sub UserForm_Initialize()
 
     Me.Caption = "Planter Wall Automation"
     Me.Width = 810
-    Me.Height = 545
+    Me.Height = 571
     acceptedValue = False
     Set fieldDesigns = New Collection
     nextDesignNumber = 1
@@ -85,26 +89,36 @@ Private Sub UserForm_Initialize()
     folderBox.Width = 220
     Set browseButton = AddButton("cmdBrowse", "...", 403, 256, 35)
 
-    Set quoteBox = AddCheck("chkQuoteOnly", "Quote only", 16, 318)
-    Set previewBox = AddCheck("chkPreviewOnly", "Preview only (no files created)", 235, 318)
-    Set pdfAssembliesBox = AddCheck("chkPDFAssemblies", "PDF assemblies", 16, 380)
-    Set pdfComponentsBox = AddCheck("chkPDFComponents", "PDF components", 235, 380)
-    Set dxfBox = AddCheck("chkDXF", "DXF files", 16, 406)
-    Set stepBox = AddCheck("chkSTEP", "STEP files", 235, 406)
+    Set mountBox = AddCheck("chkMountsToPlanter", "Mounts to another planter", 16, 286)
+    Set overrideBox = AddCheck("chkOverrideBaseWidth", "Override baseplate width", 16, 312)
+    Set baseWidthBox = Me.Controls.Add("Forms.TextBox.1", "txtBaseWidth", True)
+    baseWidthBox.Left = 235
+    baseWidthBox.Top = 312
+    baseWidthBox.Width = 203
+    baseWidthBox.Height = 22
+    baseWidthBox.ControlTipText = "New baseplate width in inches. The design table adds the material thickness, then doubles it."
+    baseWidthBox.Enabled = False
+
+    Set quoteBox = AddCheck("chkQuoteOnly", "Quote only", 16, 344)
+    Set previewBox = AddCheck("chkPreviewOnly", "Preview only (no files created)", 235, 344)
+    Set pdfAssembliesBox = AddCheck("chkPDFAssemblies", "PDF assemblies", 16, 406)
+    Set pdfComponentsBox = AddCheck("chkPDFComponents", "PDF components", 235, 406)
+    Set dxfBox = AddCheck("chkDXF", "DXF files", 16, 432)
+    Set stepBox = AddCheck("chkSTEP", "STEP files", 235, 432)
 
     Set note = Me.Controls.Add("Forms.Label.1", "lblNotes", True)
     note.Caption = "Quote rates, gap and margins are under Properties; defaults are provisional." & vbCrLf & _
                    "Sheet layouts are estimates, not laser-ready cutting programs."
     note.Left = 16
-    note.Top = 438
+    note.Top = 464
     note.Width = 425
     note.Height = 32
 
-    Set propertiesButton = AddButton("cmdProperties", "Properties...", 16, 478, 100)
+    Set propertiesButton = AddButton("cmdProperties", "Properties...", 16, 504, 100)
     propertiesButton.ControlTipText = "Quote material price, labor and paint rates, margin, part gap and edge margin"
-    Set runButton = AddButton("cmdRun", "Run", 250, 478, 90)
+    Set runButton = AddButton("cmdRun", "Run", 250, 504, 90)
     runButton.Default = True
-    Set cancelButton = AddButton("cmdCancel", "Cancel", 348, 478, 90)
+    Set cancelButton = AddButton("cmdCancel", "Cancel", 348, 504, 90)
     cancelButton.Cancel = True
     Set note = Me.Controls.Add("Forms.Label.1", "lblFieldAssembly", True)
     note.Caption = "FIELD ASSEMBLY - QUOTE ONLY" & vbCrLf & _
@@ -169,6 +183,7 @@ Private Sub UserForm_Initialize()
         If wallsBox.List(index) = packngo1.wallCount Then wallsBox.ListIndex = index
     Next index
     wallsBox_Change
+    overrideBox_Click
     If packngo1.wallCount = "2" Then
         Select Case packngo1.side
             Case "1": sideBox.Value = "Right"
@@ -373,6 +388,11 @@ Private Function AddButton(ByVal name As String, ByVal caption As String, _
 End Function
 
 Private Sub wallsBox_Change()
+    ' A four-wall planter is fully enclosed, so it cannot mount to another planter.
+    If Not mountBox Is Nothing Then
+        If wallsBox.Value = "4" Then mountBox.Value = False
+        mountBox.Enabled = (wallsBox.Value <> "4")
+    End If
     If sideBox Is Nothing Then Exit Sub
     sideBox.Clear
     If wallsBox.Value = "2" Then
@@ -386,6 +406,17 @@ Private Sub wallsBox_Change()
         sideBox.Enabled = False
     End If
 End Sub
+
+Private Sub overrideBox_Click()
+    baseWidthBox.Enabled = overrideBox.Value
+    If Not overrideBox.Value Then baseWidthBox.Text = ""
+End Sub
+
+Private Function ReadBaseWidth() As Double
+    If Not overrideBox.Value Then Exit Function
+    ReadBaseWidth = ReadDimension(baseWidthBox, "Baseplate width")
+    UIValidateBaseWidth True, ReadBaseWidth
+End Function
 
 Private Sub quoteBox_Click()
     If pdfAssembliesBox Is Nothing Then Exit Sub
@@ -486,6 +517,9 @@ Private Sub planterList_Change()
     heightBox.Text = CStr(result.Height)
     materialBox.Value = result.Material
     thicknessBox.Value = IIf(result.Thickness = 0.25, "1/4 inch", "3/16 inch")
+    mountBox.Value = result.MountsToPlanter
+    overrideBox.Value = result.OverrideBaseWidth
+    baseWidthBox.Text = IIf(result.OverrideBaseWidth, CStr(result.BaseWidth), "")
     paintedToggle.Value = result.Painted
     priceBox.Text = CStr(result.PricePerPound)
     cutRateBox.Text = CStr(result.CutRate)
@@ -543,6 +577,7 @@ Private Sub runButton_Click()
     Dim gauge As String
     Dim material As String
     Dim quoteMargin As Double
+    Dim baseWidth As Double
 
     On Error GoTo InvalidInput
     If quoteBox.Value Then
@@ -572,7 +607,8 @@ Private Sub runButton_Click()
     length = ReadDimension(lengthBox, "Overall length")
     width = ReadDimension(widthBox, "Overall width")
     height = ReadDimension(heightBox, "Overall height")
-    UIValidateDimensions length, width, height
+    UIValidateDimensions length, width, height, CLng(wallsBox.Value)
+    baseWidth = ReadBaseWidth()
     selectedFolder = Trim$(folderBox.Text)
     If Not previewBox.Value And Not quoteBox.Value Then Call UIOutputRoot(selectedFolder)
 
@@ -588,7 +624,8 @@ Private Sub runButton_Click()
     gauge = IIf(thicknessBox.Value = "3/16 inch", "3/16", "1/4")
     material = IIf(materialBox.Value = "Mild Steel", "MILD STEEL", "BORCON WEATHERING STEEL")
     designTableInputs = Array(UIWallTableLabel(CLng(wallsBox.Value), CStr(sideBox.Value)), _
-        UIReturnTableLabel(CStr(returnBox.Value)), length, width, height, gauge, material)
+        UIReturnTableLabel(CStr(returnBox.Value)), length, width, height, gauge, material, _
+        UIYesNo(CBool(mountBox.Value)), UIYesNo(CBool(overrideBox.Value)), baseWidth)
     outputFolder = selectedFolder
     quoteOnly = CBool(quoteBox.Value)
     exportPDFAssemblies = Not quoteOnly And CBool(pdfAssembliesBox.Value)
@@ -614,6 +651,7 @@ Private Function ReadQuoteDesign() As UIQuoteResult
     Dim width As Double
     Dim height As Double
     Dim quantity As Long
+    Dim baseWidth As Double
     Dim pricePerPound As Double
     Dim partGap As Double
     Dim edgeMargin As Double
@@ -626,7 +664,8 @@ Private Function ReadQuoteDesign() As UIQuoteResult
     length = ReadDimension(lengthBox, "Overall length")
     width = ReadDimension(widthBox, "Overall width")
     height = ReadDimension(heightBox, "Overall height")
-    UIValidateDimensions length, width, height
+    UIValidateDimensions length, width, height, CLng(wallsBox.Value)
+    baseWidth = ReadBaseWidth()
     quantity = UIQuoteParseQuantity(quantityBox.Text)
     On Error GoTo InvalidProperty
     pricePerPound = UIQuoteParsePrice(priceBox.Text)
@@ -640,6 +679,9 @@ Private Function ReadQuoteDesign() As UIQuoteResult
         UIQuoteParseRate(paintRateBox.Text, "Paint rate"), quoteMargin
     On Error GoTo 0
     UIQuoteSetQuantity result, quantity
+    result.MountsToPlanter = CBool(mountBox.Value)
+    result.OverrideBaseWidth = CBool(overrideBox.Value)
+    result.BaseWidth = baseWidth
     result.EstimateLabel = Trim$(designNameBox.Text)
     If Len(result.EstimateLabel) = 0 Then result.EstimateLabel = "Planter design " & CStr(nextDesignNumber)
     Set ReadQuoteDesign = result
