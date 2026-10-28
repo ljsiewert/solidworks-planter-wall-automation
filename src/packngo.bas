@@ -67,6 +67,11 @@ Public sideRightName As String
 Public sideCenterName As String
 Public sideWallName As String
 Public sharedSideName As String
+Public customSuffix As String
+Public sideWallPartName As String
+Public sideLeftWallPartName As String
+Public sideRightWallPartName As String
+Public sideCenterWallPartName As String
 
 Public packTestFolder As String
 Public destFolder As String
@@ -299,6 +304,12 @@ Function Step3_BuildNames() As Boolean
         "S" & pnSideLength & _
         "-" & pnHeight & _
         "-" & thicknessLabel & overallMaterial
+
+    ' Side wall parts default to their assembly names; the UI may override them.
+    sideWallPartName = sideName
+    sideLeftWallPartName = sideLeftName
+    sideRightWallPartName = sideRightName
+    sideCenterWallPartName = sideCenterName
 
     Step3_BuildNames = True
 
@@ -870,6 +881,8 @@ End Function
 
 Function GetNewBaseName(currentFile As String) As String
 
+    Dim dotPos As Long
+
     Select Case LCase$(currentFile)
 
         '======================================================
@@ -952,28 +965,28 @@ Function GetNewBaseName(currentFile As String) As String
         '======================================================
 
         Case "planterwallside.sldprt"
-            GetNewBaseName = sideName & "-W.SLDPRT"
+            GetNewBaseName = sideWallPartName & "-W.SLDPRT"
 
         Case "planterwallside.slddrw"
-            GetNewBaseName = sideName & "-W.SLDDRW"
+            GetNewBaseName = sideWallPartName & "-W.SLDDRW"
 
         Case "planterwallsideleft.sldprt"
-            GetNewBaseName = sideLeftName & "-W.SLDPRT"
+            GetNewBaseName = sideLeftWallPartName & "-W.SLDPRT"
 
         Case "planterwallsideleft.slddrw"
-            GetNewBaseName = sideLeftName & "-W.SLDDRW"
+            GetNewBaseName = sideLeftWallPartName & "-W.SLDDRW"
 
         Case "planterwallsideright.sldprt"
-            GetNewBaseName = sideRightName & "-W.SLDPRT"
+            GetNewBaseName = sideRightWallPartName & "-W.SLDPRT"
 
         Case "planterwallsideright.slddrw"
-            GetNewBaseName = sideRightName & "-W.SLDDRW"
+            GetNewBaseName = sideRightWallPartName & "-W.SLDDRW"
 
         Case "planterwallsidecenter.sldprt"
-            GetNewBaseName = sideCenterName & "-W.SLDPRT"
+            GetNewBaseName = sideCenterWallPartName & "-W.SLDPRT"
 
         Case "planterwallsidecenter.slddrw"
-            GetNewBaseName = sideCenterName & "-W.SLDDRW"
+            GetNewBaseName = sideCenterWallPartName & "-W.SLDDRW"
 
 
         '======================================================
@@ -1012,6 +1025,14 @@ Function GetNewBaseName(currentFile As String) As String
             GetNewBaseName = ""
 
     End Select
+
+    ' A custom suffix (e.g. -C1) goes last, just before the file extension.
+    If GetNewBaseName <> "" And customSuffix <> "" Then
+        dotPos = InStrRev(GetNewBaseName, ".")
+        If LCase$(Mid$(GetNewBaseName, dotPos - Len(customSuffix), Len(customSuffix))) <> LCase$(customSuffix) Then
+            GetNewBaseName = Left$(GetNewBaseName, dotPos - 1) & customSuffix & Mid$(GetNewBaseName, dotPos)
+        End If
+    End If
 
 End Function
 

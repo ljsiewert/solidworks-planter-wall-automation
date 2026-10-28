@@ -13,7 +13,10 @@ Public Quantity As Long
 Public EstimateLabel As String
 Public MountsToPlanter As Boolean
 Public OverrideBaseWidth As Boolean
+Public CustomCuts As Boolean
 Public BaseWidth As Double
+Public DepthDimension As Double
+Public ContinuationLength As Double
 Public WallCount As Long
 Public Orientation As String
 Public ReturnLabel As String

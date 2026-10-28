@@ -133,7 +133,7 @@ Option Explicit
 Dim loadingDesign, fieldDesigns, planterList, updatePlanterButton, quoteBox, designNameBox, quantityBox
 Dim wallsBox, sideBox, returnBox, lengthBox, widthBox, heightBox, materialBox, thicknessBox, paintedToggle
 Dim priceBox, cutRateBox, bendRateBox, weldRateBox, paintRateBox, gapBox, marginBox, quoteMarginBox, nextDesignNumber
-Dim mountBox, overrideBox, baseWidthBox
+Dim mountBox, overrideBox, baseWidthBox, customBox
 Dim a, b, replacement, code, design
 Class Control
     Public Text, Value, Enabled, ListIndex
@@ -190,7 +190,7 @@ End Function
                      "wallsBox", "sideBox", "returnBox", "lengthBox", "widthBox", "heightBox",
                      "materialBox", "thicknessBox", "paintedToggle", "priceBox", "cutRateBox",
                      "bendRateBox", "weldRateBox", "paintRateBox", "gapBox", "marginBox", "quoteMarginBox",
-                     "mountBox", "overrideBox", "baseWidthBox"):
+                     "mountBox", "overrideBox", "baseWidthBox", "customBox"):
             script += f"Set {name} = New Control\n"
         script += r'''
 Set a = New UIQuoteResult
@@ -215,6 +215,7 @@ a.PartGap = 0
 a.EdgeMargin = 0.2
 a.TotalCost = 1000
 a.MountsToPlanter = True
+a.CustomCuts = True
 a.OverrideBaseWidth = True
 a.BaseWidth = 7.5
 b.EstimateLabel = "South"
@@ -231,7 +232,7 @@ Assert CDbl(lengthBox.Text) = a.OverallLength And CDbl(widthBox.Text) = a.Overal
 Assert materialBox.Value = a.Material And thicknessBox.Value = "3/16 inch" And paintedToggle.Value, "Selection loads material and paint"
 Assert CDbl(priceBox.Text) = a.PricePerPound And CDbl(cutRateBox.Text) = 80 And CDbl(bendRateBox.Text) = 6, "Selection loads prices"
 Assert CDbl(weldRateBox.Text) = 12 And CDbl(paintRateBox.Text) = 3 And CDbl(gapBox.Text) = 0 And CDbl(marginBox.Text) = 0.2, "Selection loads rates and spacing"
-Assert mountBox.Value And overrideBox.Value And CDbl(baseWidthBox.Text) = 7.5, "Selection loads mounting and baseplate options"
+Assert mountBox.Value And overrideBox.Value And CDbl(baseWidthBox.Text) = 7.5 And customBox.Value, "Selection loads mounting and baseplate options"
 Assert quoteMarginBox.Text = "50", "Selecting designs never replaces shared margin"
 Assert updatePlanterButton.Enabled, "Selection enables Save changes"
 Set replacement = New UIQuoteResult

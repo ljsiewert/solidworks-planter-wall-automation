@@ -56,6 +56,22 @@ class SourceContracts(unittest.TestCase):
         self.assertIn("    UICollectPackAndGoDocuments", MODULE)
         self.assertNotIn("packngo1.Step4_GetDocumentNames()", MODULE)
 
+    def test_custom_part_numbers(self):
+        check = helper_body("UICheckDestination")
+        self.assertIn("UIApplyActualDimensionNames", check)
+        self.assertIn('FolderExists(root & packngo1.masterName & "-C" & CStr(serial)', check)
+        self.assertIn("UIIsCustomPlanter()", check)
+        names = helper_body("UIApplyActualDimensionNames")
+        for expected in ("2 * thickness", "centerHardwareName", "sharedSideName", "2 * (CDbl(designTableInputs(9)) + thickness)"):
+            self.assertIn(expected, names)
+        suffix = helper_body("UIAppendNameSuffix")
+        self.assertIn("packngo1.customSuffix = suffix", suffix)
+        self.assertIn("packngo1.masterName = packngo1.masterName & suffix", suffix)
+        packngo = (ROOT / "src" / "packngo.bas").read_text(encoding="ascii")
+        self.assertIn("GetNewBaseName & customSuffix", packngo.replace("Left$(GetNewBaseName, dotPos - 1) & customSuffix", "GetNewBaseName & customSuffix"))
+        self.assertIn("customCuts", helper_body("UIIsCustomPlanter"))
+        form = (ROOT / "src" / "UserForm_AutomationUI.frm").read_text(encoding="ascii")
+        self.assertIn("customCuts = CBool(customBox.Value)", form)
     def test_design_table_and_template_safety(self):
         for equation in ("WALL_COUNT", "SIDE", "RETURN_TYPE", "OVERALL_LENGTH",
                          "OVERALL_WIDTH", "OVERALL_HEIGHT", "CENTER_PLANTER_LENGTH",
@@ -330,6 +346,7 @@ Dim wallCount, side, returnType, overallMaterial, thicknessLabel
 Dim overallLength, overallWidth, overallHeight, centerPlanterLength, sidePlanterLength
 Dim masterName, centerName, centerHardwareName, centerGussetName, mountingGussetName
 Dim sideName, sideLeftName, sideRightName, sideCenterName, sideWallName, sharedSideName
+Dim sideWallPartName, sideLeftWallPartName, sideRightWallPartName, sideCenterWallPartName
 SetLocale 1033
 Class PackState
     Public wallCount, side, returnType, overallMaterial, thicknessLabel
@@ -433,15 +450,17 @@ Assert UIReadTableNumber("=113", "N10") = 113, "Calculated string value"
 Assert UIReadTableNumber("=100.4", "N11") = 100.4, "Calculated side value"
 Assert UIReadTableNumber("=0", "C3") = 0, "Zero orientation"
 Assert UIReadTableNumber(0.1875, "K3") = 0.1875, "Numeric thickness"
-UIValidateDimensions 60, 60, 6, 4
+UIValidateDimensions 60, 60, 6, 4, False
 Assert UIYesNo(True) = "YES" And UIYesNo(False) = "NO", "Yes/no flags"
 Assert UITableInputAddress(6) = "Q9" And UITableInputAddress(7) = "Q13" And UITableInputAddress(9) = "Q15", "Input cells"
 UIValidateBaseWidth False, 0
 UIValidateBaseWidth True, 7.5
-UIValidateDimensions 60, 60, 48, 4
-UIValidateDimensions 60, 12, 27, 3
-UIValidateDimensions 12, 12, 27, 2
-UIValidateDimensions 12, 12, 27, 1
+UIValidateDimensions 60, 60, 48, 4, False
+UIValidateDimensions 60, 24, 31, 4, True
+UIValidateDimensions 60, 24, 31, 3, False
+UIValidateDimensions 60, 12, 27, 3, False
+UIValidateDimensions 12, 12, 27, 2, False
+UIValidateDimensions 12, 12, 27, 1, False
 ExpectBadDimensions 12, 12, 27
 ExpectBadDimensions 60, 60, 5.999
 ExpectBadDimensions 60, 60, 48.001

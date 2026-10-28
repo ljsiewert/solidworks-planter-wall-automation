@@ -12,6 +12,7 @@ Public exportDXF As Boolean
 Public exportSTEP As Boolean
 Public outputFolder As String
 Public designTableInputs As Variant
+Public customCuts As Boolean
 
 ' These are referenced, but not declared, by the supplied packngo1 source.
 Public filteredExcludedFiles As Boolean
@@ -296,7 +297,8 @@ Public Sub UIValidateBaseWidth(ByVal overrideWidth As Boolean, ByVal baseWidth A
     End If
 End Sub
 
-Public Sub UIValidateDimensions(ByVal length As Double, ByVal width As Double, ByVal height As Double, ByVal walls As Long)
+Public Sub UIValidateDimensions(ByVal length As Double, ByVal width As Double, ByVal height As Double, ByVal walls As Long, _
+                                ByVal widthOverridden As Boolean)
     If height < 6 Or height > 48 Then
         Err.Raise UI_ERROR, "UIValidateDimensions", "Height must be between 6 and 48 inches, inclusive."
     End If
@@ -304,10 +306,11 @@ Public Sub UIValidateDimensions(ByVal length As Double, ByVal width As Double, B
         Err.Raise UI_ERROR, "UIValidateDimensions", "Length and width must each be at least 6 inches."
     End If
     ' Open sides relax the height rule: 3 walls free the width, 1 or 2 walls free both.
+    ' A baseplate width override also frees the width.
     If walls >= 3 And length <= height Then
         Err.Raise UI_ERROR, "UIValidateDimensions", "Length must be greater than height."
     End If
-    If walls >= 4 And width <= height Then
+    If walls >= 4 And Not widthOverridden And width <= height Then
         Err.Raise UI_ERROR, "UIValidateDimensions", "With 4 walls, width must be greater than height."
     End If
 End Sub
@@ -436,12 +439,25 @@ End Sub
 Public Sub UICheckDestination()
     Dim fso As Object
     Dim candidate As String
+    Dim root As String
+    Dim serial As Long
 
     Set fso = CreateObject("Scripting.FileSystemObject")
+    packngo1.customSuffix = ""
     If Not packngo1.Step3_BuildNames() Then
         Err.Raise UI_ERROR, "UICheckDestination", "Could not build the output part numbers."
     End If
-    candidate = UIOutputRoot(outputFolder) & packngo1.masterName & "\"
+    UIApplyActualDimensionNames
+    root = UIOutputRoot(outputFolder)
+    If UIIsCustomPlanter() Then
+        ' Custom planters take the first -C<n> whose output folder is not already in use.
+        serial = 1
+        Do While fso.FolderExists(root & packngo1.masterName & "-C" & CStr(serial) & "\")
+            serial = serial + 1
+        Loop
+        UIAppendNameSuffix "-C" & CStr(serial)
+    End If
+    candidate = root & packngo1.masterName & "\"
     If fso.FolderExists(candidate) Then
         Err.Raise UI_ERROR, "UICheckDestination", _
             "This output already exists. Choose another parent folder; UI mode never overwrites:" & _
@@ -449,6 +465,47 @@ Public Sub UICheckDestination()
     End If
 End Sub
 
+Public Function UIIsCustomPlanter() As Boolean
+    UIIsCustomPlanter = customCuts
+    If UBound(designTableInputs) >= 9 Then
+        If designTableInputs(8) = "YES" Then UIIsCustomPlanter = True
+    End If
+End Function
+
+Public Sub UIAppendNameSuffix(ByVal suffix As String)
+    ' packngo1.GetNewBaseName places the suffix after -W/-BP/-LW, right before the extension.
+    packngo1.customSuffix = suffix
+    packngo1.masterName = packngo1.masterName & suffix
+End Sub
+
+' Side walls and base plates are named for their blank length (side length - 2*T), while side assemblies keep the planter length; center parts use the
+' CONTINUATION_LENGTH the model uses when the baseplate width is overridden.
+Public Sub UIApplyActualDimensionNames()
+    Dim thickness As Double
+    Dim continuation As Double
+    Dim pnSide As String
+    Dim pnHeight As String
+    Dim tail As String
+    thickness = IIf(packngo1.thicknessLabel = "1", 0.1875, 0.25)
+    pnHeight = packngo1.FormatPNDimension(CDbl(packngo1.overallHeight))
+    tail = "-" & pnHeight & "-" & packngo1.thicknessLabel & packngo1.overallMaterial
+    pnSide = packngo1.FormatPNDimension(CDbl(packngo1.sidePlanterLength) - 2 * thickness)
+    packngo1.sideWallPartName = packngo1.returnType & "-S" & pnSide & tail
+    packngo1.sideLeftWallPartName = packngo1.returnType & "-SL" & pnSide & tail
+    packngo1.sideRightWallPartName = packngo1.returnType & "-SR" & pnSide & tail
+    packngo1.sideCenterWallPartName = packngo1.returnType & "-SC" & pnSide & tail
+    packngo1.sharedSideName = "S" & pnSide & tail
+    If UBound(designTableInputs) >= 9 Then
+        If designTableInputs(8) = "YES" Then
+            continuation = CDbl(packngo1.overallHeight) - 2 * (CDbl(designTableInputs(9)) + thickness) + CDbl(packngo1.centerPlanterLength)
+            If continuation <= 0 Then
+                Err.Raise UI_ERROR, "UIApplyActualDimensionNames", "The baseplate width override leaves no center planter length."
+            End If
+            packngo1.centerName = packngo1.returnType & "-C" & packngo1.FormatPNDimension(continuation) & tail
+            packngo1.centerHardwareName = "C" & packngo1.FormatPNDimension(continuation) & tail
+        End If
+    End If
+End Sub
 Public Sub UICheckExportFiles()
     If exportDXF Then UIRequireMacro "dxfcomponents.swp"
     If exportSTEP Then UIRequireMacro "stepcomponents.swp"

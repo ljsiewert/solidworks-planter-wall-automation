@@ -5,11 +5,13 @@ Public Function UICalculateQuote(ByVal walls As Long, ByVal orientation As Strin
     ByVal returnLabel As String, ByVal material As String, ByVal thicknessLabel As String, _
     ByVal length As Double, ByVal width As Double, ByVal height As Double, _
     Optional ByVal pricePerPound As Double = 0.9, _
-    Optional ByVal partGap As Double = 0.25, Optional ByVal edgeMargin As Double = 0.25) As UIQuoteResult
+    Optional ByVal partGap As Double = 0.25, Optional ByVal edgeMargin As Double = 0.25, _
+    Optional ByVal widthOverridden As Boolean = False, Optional ByVal baseWidth As Double = 0, _
+    Optional ByVal mounts As Boolean = False) As UIQuoteResult
     Dim result As UIQuoteResult
     Dim available As Double
     UIValidateSelections walls, orientation, returnLabel, material, thicknessLabel
-    UIValidateDimensions length, width, height, walls
+    UIValidateDimensions length, width, height, walls, widthOverridden
     If pricePerPound <= 0 Then
         Err.Raise vbObjectError + 2400, "UICalculateQuote", "Material price must be greater than zero dollars per lb."
     End If
@@ -25,6 +27,18 @@ Public Function UICalculateQuote(ByVal walls As Long, ByVal orientation As Strin
     result.OverallLength = length
     result.OverallWidth = width
     result.Height = height
+    result.MountsToPlanter = mounts
+    result.OverrideBaseWidth = widthOverridden
+    If widthOverridden Then
+        If baseWidth <= 0 Then
+            Err.Raise vbObjectError + 2400, "UICalculateQuote", "Enter a baseplate width greater than zero."
+        End If
+        result.BaseWidth = baseWidth
+        ' Sheet equation: DEPTH_OVERRIDE_DIMENSION = 2 * (entered width + thickness).
+        result.DepthDimension = 2 * (baseWidth + result.Thickness)
+    Else
+        result.DepthDimension = height
+    End If
     Select Case walls
         Case 1: available = length
         Case 2: available = length - height / 2
@@ -47,7 +61,15 @@ Public Function UICalculateQuote(ByVal walls As Long, ByVal orientation As Strin
         Case 2: result.SideWallRuns = 1
         Case 3, 4: result.SideWallRuns = 2
     End Select
-    result.CenterGussets = UIQuoteGussets(result.CenterLength)
+    ' CONTINUATION_LENGTH = HEIGHT - DEPTH_OVERRIDE_DIMENSION + CENTER_PLANTER_LENGTH; it replaces the center length.
+    result.ContinuationLength = result.CenterLength
+    If widthOverridden Then
+        result.ContinuationLength = height - result.DepthDimension + result.CenterLength
+        If result.ContinuationLength <= 0 Then
+            Err.Raise vbObjectError + 2400, "UICalculateQuote", "The baseplate width override leaves no center planter length. Use a smaller width."
+        End If
+    End If
+    result.CenterGussets = UIQuoteGussets(result.ContinuationLength)
     result.SideGussets = UIQuoteGussets(result.SideLength)
     result.SideMate = result.CenterLength / 2 + height / 2
     result.SideMateRight = result.SideMate + (result.CenterPatternCount - 1) * result.CenterLength
@@ -321,20 +343,22 @@ Private Sub UIQuoteComponents(ByVal result As UIQuoteResult)
     Dim sides As Double
     Dim parts(0 To 7) As UIQuoteComponent
     Dim i As Long
+    Dim basis As Double
     centers = result.CenterPatternCount * result.CenterWallRuns
     sides = result.SidePlantersPerWall * result.SideWallRuns
+    basis = result.DepthDimension
     result.FlatHeight = UIQuoteFlatHeight(result.Height, result.Thickness, result.ReturnLabel)
     result.SideBlankLength = result.SideLength - 2 * result.Thickness
-    result.GussetHeight = result.Height - 2.1 - result.Thickness
-    result.GussetBottomWidth = result.Height / 2 - result.Thickness - 0.5
+    result.GussetHeight = basis - 2.1 - result.Thickness
+    result.GussetBottomWidth = basis / 2 - result.Thickness - 0.5
     result.GussetTopWidth = result.GussetBottomWidth / 3
-    Set parts(0) = UIQuotePart(result, "Center Planter Wall", "Center", result.CenterLength, result.FlatHeight, 0, centers, "CENTER_PLANTER_LENGTH x calibrated flat height")
-    Set parts(1) = UIQuotePart(result, "Center Planter Base Plate", "Center", result.CenterLength, result.Height / 2, 0, centers, "CENTER_PLANTER_LENGTH x H/2")
+    Set parts(0) = UIQuotePart(result, "Center Planter Wall", "Center", result.ContinuationLength, result.FlatHeight, 0, centers, "CENTER_PLANTER_LENGTH (OVERALL_LENGTH) x calibrated flat height")
+    Set parts(1) = UIQuotePart(result, "Center Planter Base Plate", "Center", result.ContinuationLength, basis / 2, 0, centers, "CENTER_PLANTER_LENGTH (OVERALL_LENGTH) x DEPTH/2 (DEPTH = H unless base width is overridden)")
     Set parts(2) = UIQuotePart(result, "Side Planter Wall", "Side", result.SideBlankLength, result.FlatHeight, 0, sides, "(SIDE_PLANTER_LENGTH - 2*T) x calibrated flat height")
-    Set parts(3) = UIQuotePart(result, "Side Planter Base Plate", "Side", result.SideBlankLength, result.Height / 2, 0, sides, "(SIDE_PLANTER_LENGTH - 2*T) x H/2")
+    Set parts(3) = UIQuotePart(result, "Side Planter Base Plate", "Side", result.SideBlankLength, basis / 2, 0, sides, "(SIDE_PLANTER_LENGTH - 2*T) x DEPTH/2 (DEPTH = H unless base width is overridden)")
     Set parts(4) = UIQuotePart(result, "Left Side Wall", "Side ends", result.Height / 2, result.FlatHeight, 0, result.SideWallRuns, "H/2 x calibrated flat height; one per side run")
     Set parts(5) = UIQuotePart(result, "Right Side Wall", "Side ends", result.Height / 2, result.FlatHeight, 0, result.SideWallRuns, "H/2 x calibrated flat height; one per side run")
-    Set parts(6) = UIQuotePart(result, "Mounting Gusset", "Shared", result.GussetHeight, result.GussetBottomWidth, result.GussetTopWidth, 2 * (centers + sides), "Height=H-2.1-T; bottom=H/2-T-0.5; top=bottom/3; qty=2 per planter")
+    Set parts(6) = UIQuotePart(result, "Mounting Gusset", "Shared", result.GussetHeight, result.GussetBottomWidth, result.GussetTopWidth, 2 * (centers + sides), "Height=DEPTH-2.1-T; bottom=DEPTH/2-T-0.5; top=bottom/3; qty=2 per planter (DEPTH = H unless base width is overridden)")
     Set parts(7) = UIQuotePart(result, "Center Gusset", "Shared", result.GussetHeight, result.GussetBottomWidth, result.GussetTopWidth, centers * (result.CenterGussets - 1) + sides * (result.SideGussets - 1), "Same profile as mounting; qty=centers*(CENTER_GUSSETS-1)+sides*(SIDE_GUSSETS-1)")
     result.Components = parts
     result.HasValidTotals = (Len(result.Warnings) = 0)
@@ -380,8 +404,15 @@ Public Function UIQuoteReport(ByVal result As UIQuoteResult) As String
         "Center wall runs: " & result.CenterWallRuns & vbCrLf & _
         "Center sizing segments per run (workbook): " & UIInchesText(result.CenterSizingSegments) & vbCrLf & _
         "CENTER_WALL_PATTERN_COUNT (assembly): " & UIInchesText(result.CenterPatternCount) & vbCrLf & _
-        "CENTER_PLANTER_LENGTH (in): " & UIInchesText(result.CenterLength) & vbCrLf & _
-        "CENTER_GUSSETS equation value: " & result.CenterGussets & vbCrLf & vbCrLf & _
+        "CENTER_PLANTER_LENGTH (in): " & UIInchesText(result.CenterLength) & vbCrLf
+    If result.OverrideBaseWidth Then
+        text = text & "Base width override (in): " & UIInchesText(result.BaseWidth) & _
+            "; DEPTH_OVERRIDE_DIMENSION: " & UIInchesText(result.DepthDimension) & _
+            "; CONTINUATION_LENGTH: " & UIInchesText(result.ContinuationLength) & vbCrLf
+    End If
+    If result.MountsToPlanter Then text = text & "Mounts to another planter: yes" & vbCrLf
+    If result.CustomCuts Or result.OverrideBaseWidth Then text = text & "Custom planter: part numbers end in -C<n>" & vbCrLf
+    text = text & "CENTER_GUSSETS equation value: " & result.CenterGussets & vbCrLf & vbCrLf & _
         "Side wall runs: " & result.SideWallRuns & vbCrLf & _
         "Side sizing segments per run (workbook): " & UIInchesText(result.SideSizingSegments) & vbCrLf & _
         "SIDE_WALL_PLANTER_COUNT per side run (assembly): " & UIInchesText(result.SidePlantersPerWall) & vbCrLf & _

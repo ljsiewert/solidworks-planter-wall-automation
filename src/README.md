@@ -190,8 +190,22 @@ The component report implements [Component_Quote_Formulas.txt](../Component_Quot
   Measurements were supplied at H=48; other heights remain predictions,
   including H=23.75. These are calibrated rules, not exact theoretical bend
   calculations or live SolidWorks measurements.
-- Gusset height = H-2.1-T; bottom width = H/2-T-0.5; top width = bottom/3.
+- Gusset height = DEPTH-2.1-T; bottom width = DEPTH/2-T-0.5; top width = bottom/3.
   Area = (top+bottom)/2*height; both gusset types use that same trapezoid.
+- DEPTH is H unless "Override baseplate width" is on, then
+  DEPTH = 2*(entered width + T) (the sheet's DEPTH_OVERRIDE_DIMENSION). Base
+  plates are DEPTH/2 wide. Center wall, center base plate and the center gusset
+  count use CONTINUATION_LENGTH = H - DEPTH + center length. Side lengths and
+  end walls (H/2) are unchanged. "Mounts to another planter" does not change
+  the quote (it swaps side assemblies for left/right equivalents).
+- Side wall and base plate part numbers use the blank length (side length - 2T);
+  side assemblies keep the planter length. packngo.bas gained four side-wall name
+  variables (default to the assembly names) so the UI can do this.
+  With the override on, center names use the continuation length.
+- A planter is custom when the baseplate width is overridden or "Custom cuts made"
+  is checked. Every part number and the output folder then end in -C<n>: the first
+  n whose output folder does not already exist in the chosen parent folder.
+  The suffix is always last in the file name (after -W/-BP/-LW), via packngo.customSuffix.
 - Each row reports material, thickness, governing rules, dimensions, profile
   area, quantity and total area. Count mismatches withhold quantities and
   aggregate areas; per-part dimensions/areas remain visible.

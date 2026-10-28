@@ -136,7 +136,7 @@ class QuoteTests(unittest.TestCase):
         self.assertIn("UIQuoteSetMargin quoteResult, margin", REPORT_FORM)
         self.assertIn("pricing = UIQuotePricingCards(quoteResult)", REPORT_FORM)
         self.assertIn("pricePerPound = UIQuoteParsePrice(priceBox.Text)", quote)
-        self.assertIn("height, pricePerPound, partGap, edgeMargin)", quote)
+        self.assertIn("height, pricePerPound, partGap, edgeMargin, CBool(overrideBox.Value), baseWidth, CBool(mountBox.Value))", quote)
         self.assertIn("UIQuoteParsePrice = UIParseInches(text)", CALCULATOR)
         self.assertIn("no currency symbol or commas", CALCULATOR)
         self.assertIn("Optional ByVal pricePerPound As Double = 0.9", CALCULATOR)
@@ -198,6 +198,8 @@ class QuoteTests(unittest.TestCase):
                 body = body.replace("Optional ByVal pricePerPound = 0.9", "ByVal pricePerPound")
                 body = body.replace("Optional ByVal partGap = 0.25", "ByVal partGap")
                 body = body.replace("Optional ByVal edgeMargin = 0.25", "ByVal edgeMargin")
+                body = body.replace("Optional ByVal widthOverridden = False", "ByVal widthOverridden")
+                body = body.replace("Optional ByVal baseWidth = 0", "ByVal baseWidth").replace("Optional ByVal mounts = False", "ByVal mounts")
                 body = body.replace("UICalculateQuote", "UIQuoteWithPrice")
             body = re.sub(r"^(\s*Next) \w+$", r"\1", body, flags=re.MULTILINE)
             body = re.sub(r"\bTrim\$", "Trim", body)
@@ -347,7 +349,7 @@ Err.Clear
 On Error GoTo 0
 Assert code <> 0, "Empty field quote rejected"
 Function UICalculateQuote(walls, orient, ret, material, thickness, length, width, height)
-    Set UICalculateQuote = UIQuoteWithPrice(walls, orient, ret, material, thickness, length, width, height, 0.9, 0.25, 0.25)
+    Set UICalculateQuote = UIQuoteWithPrice(walls, orient, ret, material, thickness, length, width, height, 0.9, 0.25, 0.25, False, 0, False)
 End Function
 Sub CheckNest(q)
     Dim p, i, j, dx, dy, area, parts, pairs, gap, margin, occurrences, labels
@@ -551,7 +553,7 @@ Assert Abs(q.Density - 0.283599242) < 0.000000001, "7850 kg/m3 converted to lb/i
 Assert q.PricePerPound = 0.9, "Default price"
 Assert Abs(q.TotalWeight - q.TotalArea * q.Thickness * q.Density) < 0.000001, "Profile weight formula"
 Assert Abs(q.TotalMaterialCost - q.TotalWeight * 0.9) < 0.000001, "Material cost formula"
-Set other = UIQuoteWithPrice(4, "N/A", "Double return", "Borcon Weathering Steel", "1/4 inch", 300, 450, 48, 1.8, 0.25, 0.25)
+Set other = UIQuoteWithPrice(4, "N/A", "Double return", "Borcon Weathering Steel", "1/4 inch", 300, 450, 48, 1.8, 0.25, 0.25, False, 0, False)
 Assert other.Density = q.Density And other.TotalWeight = q.TotalWeight, "Same density for both materials"
 Assert Abs(other.TotalMaterialCost - q.TotalMaterialCost * 2) < 0.000001, "User-entered price drives cost"
 Set other = UICalculateQuote(4, "N/A", "Single return 1 inch", "Mild Steel", "3/16 inch", 400, 400, 23.75)
@@ -744,7 +746,7 @@ On Error GoTo 0
 Assert code <> 0, "Invalid selections rejected"
 For Each price In Array(0, -0.7)
     On Error Resume Next
-    Set q = UIQuoteWithPrice(1, "N/A", "No return", "Mild Steel", "1/4 inch", 100, 100, 10, price, 0.25, 0.25)
+    Set q = UIQuoteWithPrice(1, "N/A", "No return", "Mild Steel", "1/4 inch", 100, 100, 10, price, 0.25, 0.25, False, 0, False)
     code = Err.Number
     Err.Clear
     On Error GoTo 0
@@ -755,6 +757,20 @@ CheckNest q
 Assert q.SheetCount = 7 And q.AreaMinimumSheets = 6, "Reference heuristic sheets versus area lower bound"
 UINestQuote q, 0.25, 0.25
 Assert Abs(q.UnusedPercent - 27.3066293650793) < 0.000001, "Reference scrap estimate"
+Set other = UIQuoteWithPrice(2, "Left", "No return", "Mild Steel", "1/4 inch", 100, 60, 31, 0.9, 0.25, 0.25, True, 8, True)
+Assert Abs(other.DepthDimension - 16.5) < 0.000001 And Abs(other.ContinuationLength - 99) < 0.000001, "Override depth and continuation length"
+Assert Abs(other.Components(1).Width - 8.25) < 0.000001 And Abs(other.Components(3).Width - 8.25) < 0.000001, "Override base plate width"
+Assert Abs(other.Components(0).Length - 99) < 0.000001 And Abs(other.Components(1).Length - 99) < 0.000001, "Center parts use continuation length"
+Assert Abs(other.GussetHeight - 14.15) < 0.000001 And other.CenterGussets = 5 And other.MountsToPlanter, "Override gusset size and count"
+Assert Abs(other.Components(4).Length - 15.5) < 0.000001, "End walls stay H/2"
+Set other = UIQuoteWithPrice(2, "Left", "No return", "Mild Steel", "1/4 inch", 100, 60, 31, 0.9, 0.25, 0.25, False, 0, False)
+Assert Abs(other.DepthDimension - 31) < 0.000001 And Abs(other.Components(1).Width - 15.5) < 0.000001, "No override keeps H/2 base plate"
+On Error Resume Next
+Set other = UIQuoteWithPrice(2, "Left", "No return", "Mild Steel", "1/4 inch", 100, 60, 31, 0.9, 0.25, 0.25, True, 0, False)
+code = Err.Number
+Err.Clear
+On Error GoTo 0
+Assert code <> 0, "Override requires a positive width"
 pdfText = UIPDFOutline(Array(Array(0, 0), Array(10, 0), Array(3, 20), Array(0, 20)), 5, 7, 90, 20, True)
 Assert InStr(pdfText, "186 232 m") > 0, "Rotated gusset origin"
 Assert InStr(pdfText, "66 250 l") > 0, "Rotated gusset top vertex"
@@ -1325,6 +1341,8 @@ WScript.Echo "PASS: demonstrable improvements and sheet elimination"
                 body = body.replace("Optional ByVal pricePerPound = 0.9", "ByVal pricePerPound")
                 body = body.replace("Optional ByVal partGap = 0.25", "ByVal partGap")
                 body = body.replace("Optional ByVal edgeMargin = 0.25", "ByVal edgeMargin")
+                body = body.replace("Optional ByVal widthOverridden = False", "ByVal widthOverridden")
+                body = body.replace("Optional ByVal baseWidth = 0", "ByVal baseWidth").replace("Optional ByVal mounts = False", "ByVal mounts")
                 body = body.replace("UICalculateQuote", "UIQuoteWithPrice")
             body = re.sub(r"^(\s*Next) \w+$", r"\1", body, flags=re.MULTILINE)
             body = re.sub(r"\bTrim\$", "Trim", body).replace("ByRef gussets()", "ByRef gussets")
@@ -1369,7 +1387,7 @@ WScript.Echo "PASS: demonstrable improvements and sheet elimination"
 
         test_body = base + r"""
 Function UICalculateQuote(walls, orient, ret, material, thickness, length, width, height)
-    Set UICalculateQuote = UIQuoteWithPrice(walls, orient, ret, material, thickness, length, width, height, 0.9, 0.25, 0.25)
+    Set UICalculateQuote = UIQuoteWithPrice(walls, orient, ret, material, thickness, length, width, height, 0.9, 0.25, 0.25, False, 0, False)
 End Function
 
 Sub CheckExample(q, name, expSheets, expBaseline, expParts, expAreaSqFt)

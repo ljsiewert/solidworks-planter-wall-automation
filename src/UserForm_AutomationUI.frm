@@ -20,6 +20,7 @@ Private WithEvents planterList As MSForms.ListBox
 Private WithEvents overrideBox As MSForms.CheckBox
 
 Private mountBox As MSForms.CheckBox
+Private customBox As MSForms.CheckBox
 Private baseWidthBox As MSForms.TextBox
 
 Private quantityBox As MSForms.TextBox
@@ -90,6 +91,8 @@ Private Sub UserForm_Initialize()
     Set browseButton = AddButton("cmdBrowse", "...", 403, 256, 35)
 
     Set mountBox = AddCheck("chkMountsToPlanter", "Mounts to another planter", 16, 286)
+    Set customBox = AddCheck("chkCustomCuts", "Custom cuts made", 235, 286)
+    customBox.ControlTipText = "Marks the planter as custom: every part number ends in -C1, -C2, ... (also used when the baseplate width is overridden)."
     Set overrideBox = AddCheck("chkOverrideBaseWidth", "Override baseplate width", 16, 312)
     Set baseWidthBox = Me.Controls.Add("Forms.TextBox.1", "txtBaseWidth", True)
     baseWidthBox.Left = 235
@@ -518,6 +521,7 @@ Private Sub planterList_Change()
     materialBox.Value = result.Material
     thicknessBox.Value = IIf(result.Thickness = 0.25, "1/4 inch", "3/16 inch")
     mountBox.Value = result.MountsToPlanter
+    customBox.Value = result.CustomCuts
     overrideBox.Value = result.OverrideBaseWidth
     baseWidthBox.Text = IIf(result.OverrideBaseWidth, CStr(result.BaseWidth), "")
     paintedToggle.Value = result.Painted
@@ -607,7 +611,7 @@ Private Sub runButton_Click()
     length = ReadDimension(lengthBox, "Overall length")
     width = ReadDimension(widthBox, "Overall width")
     height = ReadDimension(heightBox, "Overall height")
-    UIValidateDimensions length, width, height, CLng(wallsBox.Value)
+    UIValidateDimensions length, width, height, CLng(wallsBox.Value), CBool(overrideBox.Value)
     baseWidth = ReadBaseWidth()
     selectedFolder = Trim$(folderBox.Text)
     If Not previewBox.Value And Not quoteBox.Value Then Call UIOutputRoot(selectedFolder)
@@ -627,6 +631,7 @@ Private Sub runButton_Click()
         UIReturnTableLabel(CStr(returnBox.Value)), length, width, height, gauge, material, _
         UIYesNo(CBool(mountBox.Value)), UIYesNo(CBool(overrideBox.Value)), baseWidth)
     outputFolder = selectedFolder
+    customCuts = CBool(customBox.Value)
     quoteOnly = CBool(quoteBox.Value)
     exportPDFAssemblies = Not quoteOnly And CBool(pdfAssembliesBox.Value)
     exportPDFComponents = Not quoteOnly And CBool(pdfComponentsBox.Value)
@@ -664,7 +669,7 @@ Private Function ReadQuoteDesign() As UIQuoteResult
     length = ReadDimension(lengthBox, "Overall length")
     width = ReadDimension(widthBox, "Overall width")
     height = ReadDimension(heightBox, "Overall height")
-    UIValidateDimensions length, width, height, CLng(wallsBox.Value)
+    UIValidateDimensions length, width, height, CLng(wallsBox.Value), CBool(overrideBox.Value)
     baseWidth = ReadBaseWidth()
     quantity = UIQuoteParseQuantity(quantityBox.Text)
     On Error GoTo InvalidProperty
@@ -673,13 +678,14 @@ Private Function ReadQuoteDesign() As UIQuoteResult
     edgeMargin = ReadClearance(marginBox, "Sheet edge margin")
     quoteMargin = UIQuoteParseRate(quoteMarginBox.Text, "Field margin")
     Set result = UICalculateQuote(CLng(wallsBox.Value), CStr(sideBox.Value), _
-        CStr(returnBox.Value), CStr(materialBox.Value), CStr(thicknessBox.Value), length, width, height, pricePerPound, partGap, edgeMargin)
+        CStr(returnBox.Value), CStr(materialBox.Value), CStr(thicknessBox.Value), length, width, height, pricePerPound, partGap, edgeMargin, CBool(overrideBox.Value), baseWidth, CBool(mountBox.Value))
     UIQuotePricing result, CBool(paintedToggle.Value), UIQuoteParseRate(cutRateBox.Text, "Cutting labor"), _
         UIQuoteParseRate(bendRateBox.Text, "Bending labor"), UIQuoteParseRate(weldRateBox.Text, "Welding labor"), _
         UIQuoteParseRate(paintRateBox.Text, "Paint rate"), quoteMargin
     On Error GoTo 0
     UIQuoteSetQuantity result, quantity
     result.MountsToPlanter = CBool(mountBox.Value)
+    result.CustomCuts = CBool(customBox.Value)
     result.OverrideBaseWidth = CBool(overrideBox.Value)
     result.BaseWidth = baseWidth
     result.EstimateLabel = Trim$(designNameBox.Text)
