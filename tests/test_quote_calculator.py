@@ -262,7 +262,7 @@ End Class
         component_fields = re.sub(r" As (?:String|Double)\b", "", COMPONENT.split("Option Explicit", 1)[1])
         script += "\nClass UIQuoteComponent\n" + component_fields + "\nEnd Class\n"
         for name in ("UICalculateQuote", "UIQuoteFlatHeight", "UIQuotePart",
-                     "UIQuoteComponents", "UIQuoteGussets", "UIQuoteReport",
+                     "UIQuoteComponents", "UIQuoteGussets", "UIQuoteCenterPatternCount", "UIQuoteContinuationLength", "UIQuoteReport",
                      "UIQuoteSummaryCards", "UIQuoteComponentRows", "UIQuoteGussetRows",
                      "UIQuoteTableRows", "UIQuoteTotalRows", "UIQuoteSheetStats", "UIQuoteSheetRows",
                      "UIQuoteDefaultRate", "UIQuotePricing", "UIQuoteSetMargin", "UIQuoteParseRate",
@@ -758,11 +758,21 @@ Assert q.SheetCount = 7 And q.AreaMinimumSheets = 6, "Reference heuristic sheets
 UINestQuote q, 0.25, 0.25
 Assert Abs(q.UnusedPercent - 27.3066293650793) < 0.000001, "Reference scrap estimate"
 Set other = UIQuoteWithPrice(2, "Left", "No return", "Mild Steel", "1/4 inch", 100, 60, 31, 0.9, 0.25, 0.25, True, 8, True)
-Assert Abs(other.DepthDimension - 16.5) < 0.000001 And Abs(other.ContinuationLength - 99) < 0.000001, "Override depth and continuation length"
+Assert Abs(other.DepthDimension - 16.5) < 0.000001 And Abs(other.ContinuationLength - 91.75) < 0.000001, "Override depth and continuation length"
 Assert Abs(other.Components(1).Width - 8.25) < 0.000001 And Abs(other.Components(3).Width - 8.25) < 0.000001, "Override base plate width"
-Assert Abs(other.Components(0).Length - 99) < 0.000001 And Abs(other.Components(1).Length - 99) < 0.000001, "Center parts use continuation length"
-Assert Abs(other.GussetHeight - 14.15) < 0.000001 And other.CenterGussets = 5 And other.MountsToPlanter, "Override gusset size and count"
+Assert Abs(other.Components(0).Length - 91.75) < 0.000001 And Abs(other.Components(1).Length - 91.75) < 0.000001, "Center parts use continuation length"
+Assert Abs(other.GussetHeight - 14.15) < 0.000001 And other.CenterGussets = 4 And other.MountsToPlanter, "Override gusset size and count"
 Assert Abs(other.Components(4).Length - 15.5) < 0.000001, "End walls stay H/2"
+Assert other.ContinuationActive And Abs(other.SideLength - 60) < 0.000001, "Single side planter keeps W"
+Assert other.Components(4).Quantity = 0 And other.Components(5).Quantity = 1 And other.Components(6).Quantity = 5, "Continued left run swaps LW for a mounting gusset"
+Assert Abs(other.SideMate - 54.125) < 0.000001, "Override side mate uses continuation and depth"
+Set other = UIQuoteWithPrice(3, "N/A", "No return", "Mild Steel", "1/4 inch", 300, 200, 30, 0.9, 0.25, 0.25, True, 8, True)
+Assert other.CenterPatternCount = 3 And Abs(other.ContinuationLength - 94.5) < 0.000001, "Continuation length splits both ends across the pattern"
+Assert Abs(other.SideLength - 100.375) < 0.000001, "Continuation adds T/n to the side planter length"
+Assert other.Components(4).Quantity = 1 And other.Components(5).Quantity = 1 And other.Components(6).Quantity = 16, "Three walls drop one end wall per side run"
+Assert Abs(other.SideMateRight - (94.5 / 2 + 16.5 / 2 + 2 * 94.5)) < 0.000001, "Right side mate uses continuation spacing"
+Set other = UIQuoteWithPrice(4, "N/A", "No return", "Mild Steel", "1/4 inch", 300, 200, 30, 0.9, 0.25, 0.25, False, 0, True)
+Assert Not other.ContinuationActive And other.Components(4).Quantity = 2 And Abs(other.SideLength - 100.25) < 0.000001, "Four walls ignore continuation"
 Set other = UIQuoteWithPrice(2, "Left", "No return", "Mild Steel", "1/4 inch", 100, 60, 31, 0.9, 0.25, 0.25, False, 0, False)
 Assert Abs(other.DepthDimension - 31) < 0.000001 And Abs(other.Components(1).Width - 15.5) < 0.000001, "No override keeps H/2 base plate"
 On Error Resume Next
@@ -1371,7 +1381,7 @@ WScript.Echo "PASS: demonstrable improvements and sheet elimination"
         comp_fields = re.sub(r" As (?:String|Double)\b", "", COMPONENT.split("Option Explicit", 1)[1])
         base += "\nClass UIQuoteComponent\n" + comp_fields + "\nEnd Class\n"
         for name in ("UICalculateQuote", "UIQuoteFlatHeight", "UIQuotePart",
-                     "UIQuoteComponents", "UIQuoteGussets", "UIQuoteReport",
+                     "UIQuoteComponents", "UIQuoteGussets", "UIQuoteCenterPatternCount", "UIQuoteContinuationLength", "UIQuoteReport",
                      "UIQuoteSummaryCards", "UIQuoteComponentRows", "UIQuoteGussetRows",
                      "UIQuoteTableRows", "UIQuoteTotalRows", "UIQuoteSheetStats", "UIQuoteSheetRows",
                      "UIQuoteDefaultRate", "UIQuotePricing", "UIQuoteSetMargin", "UIQuoteParseRate",

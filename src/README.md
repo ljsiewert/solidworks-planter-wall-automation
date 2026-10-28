@@ -106,10 +106,10 @@ no existing output folder is required. Leaving preview mode reenables the
 controls but does not restore previous export selections; select them again.
 
 The model stays open with **unsaved** preview changes and is zoomed to fit.
-Do not save the template: close it without saving and reopen a clean template
-before another preview or full run. Existing clean-template preflight remains
-in force; this version does not permit reuse of a dirty preview. Close any
-other affected template documents without saving as well. Preview restores
+The main template may already have saved or unsaved edits; UI mode applies
+the submitted design-table inputs regardless of its saved state. Do not save
+run-time preview edits back into the template. Affected template references
+may also have unsaved changes; these do not block the run. Preview restores
 temporary reference read-only states and application preferences on completion
 or failure; no original design-table restoration is attempted.
 
@@ -136,7 +136,8 @@ No model changes need discarding after a quote.
 All export checkboxes start unchecked. Quote-only clears/disables every export,
 preview and the output folder/browser. Leaving quote mode reenables the controls
 without restoring old selections. Preview and full-model modes still require
-the original clean template. Model initialization/validation now occurs after
+the original template, but it does not have to be free of unsaved changes.
+Model initialization/validation now occurs after
 form acceptance, only for those modes. The form no longer reads template
 equations to prefill choices: it uses existing UI globals when available,
 otherwise one wall, no return, Mild Steel and 3/16-inch thickness. Dimensions
@@ -194,10 +195,15 @@ The component report implements [Component_Quote_Formulas.txt](../Component_Quot
   Area = (top+bottom)/2*height; both gusset types use that same trapezoid.
 - DEPTH is H unless "Override baseplate width" is on, then
   DEPTH = 2*(entered width + T) (the sheet's DEPTH_OVERRIDE_DIMENSION). Base
-  plates are DEPTH/2 wide. Center wall, center base plate and the center gusset
-  count use CONTINUATION_LENGTH = H - DEPTH + center length. Side lengths and
-  end walls (H/2) are unchanged. "Mounts to another planter" does not change
-  the quote (it swaps side assemblies for left/right equivalents).
+  plates are DEPTH/2 wide. Center wall, center base plate, the center gusset
+  count and the side-mate spacing use CONTINUATION_LENGTH = center length +
+  ends*(H - DEPTH)/2/CENTER_WALL_PATTERN_COUNT, where ends is 0, 1 or 2 for
+  1, 2 or 3-4 walls. End walls stay H/2.
+- "Mounts to another planter" (CONTINUATION_ACTIVE) only applies to 2 and 3
+  walls. The left run drops its Left Side Wall and the right run drops its
+  Right Side Wall (3 walls: one of each; 2 walls: the selected side); each
+  dropped end wall becomes one extra mounting gusset. With more than one side
+  planter per run, SIDE_PLANTER_LENGTH adds T/n (W/n + T + T(n-2+1)/n).
 - Side wall and base plate part numbers use the blank length (side length - 2T);
   side assemblies keep the planter length. packngo.bas gained four side-wall name
   variables (default to the assembly names) so the UI can do this.
@@ -685,10 +691,11 @@ instead of sending keystrokes or clicking arbitrary dialogs.
 
 The guard discovers recursive dependencies, including suppressed references,
 and affects only matching documents already loaded when it starts. The main
-template and unrelated open documents are not made read-only. If an affected
-reference already has unsaved changes, the workflow stops **before changing
-any reference state**: resolve those changes manually and rerun. This also
-protects shared references with existing unsaved work in another assembly.
+template and unrelated open documents are not made read-only. Affected
+references are protected regardless of their saved state; pre-existing
+unsaved reference edits do not block the run and may be discarded when
+references are unloaded or the original is closed. This includes template
+references shared with another open assembly.
 
 The guard remains active through template updates, Pack-and-Go and closing
 the original without saving. Before opening the packed assembly/exporting, it restores the
@@ -700,8 +707,8 @@ permissions or file contents and never saves template references.
 The design-table adapter refreshes protection before each table commit and
 rebuild. It also refreshes protection before closing the original. Previously checked paths that have been
 unloaded/reloaded are made read-only again without replacing their original
-state snapshot. Newly loaded references are added only if clean; untracked
-dirty references stop the workflow rather than being silently discarded.
+state snapshot. Newly loaded references are added regardless of whether they
+have unsaved changes.
 Virtual components or references loaded within a blocking API call may
 still prompt. This is not a universal "Don't Save" handler. Automatic discard
 can unload modified suppressed references, so verify the packed model's
@@ -823,8 +830,11 @@ quote-only, all exports can be off for model-only output.
   `ISldWorks.CloseDoc`. There is no original-table restoration or second
   template rebuild. The original disk files are not saved by this workflow.
   Stage 7 now closes the original and releases temporary reference protection.
-- Pre-existing unsaved main-template changes block the run, as do unsaved
-  affected references. Reopen a clean template before starting. On failure,
+- Pre-existing unsaved main-template changes do not block the run; UI inputs
+  are applied to its current state. A successful full run closes the original
+  without saving, discarding any pre-existing unsaved main-template edits too.
+  Unsaved affected references also do not block the run and may be discarded.
+  On failure,
   the table editor is closed if possible, temporary protection/settings are
   restored, and any still-open original is left unsaved for inspection:
   **close it without saving** to discard changes. Do not save its run-time

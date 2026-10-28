@@ -28,6 +28,8 @@ Public Function UICalculateQuote(ByVal walls As Long, ByVal orientation As Strin
     result.OverallWidth = width
     result.Height = height
     result.MountsToPlanter = mounts
+    ' CONTINUATION_ACTIVE: mounting only changes the model for 2 and 3 walls.
+    result.ContinuationActive = mounts And (walls = 2 Or walls = 3)
     result.OverrideBaseWidth = widthOverridden
     If widthOverridden Then
         If baseWidth <= 0 Then
@@ -51,9 +53,9 @@ Public Function UICalculateQuote(ByVal walls As Long, ByVal orientation As Strin
     result.SideLength = width / result.SideSizingSegments
     If result.SideSizingSegments > 1 Then
         result.SideLength = result.SideLength + result.Thickness + _
-            result.Thickness * (result.SideSizingSegments - 2) / result.SideSizingSegments
+            result.Thickness * (result.SideSizingSegments - 2 + IIf(result.ContinuationActive, 1, 0)) / result.SideSizingSegments
     End If
-    result.CenterPatternCount = Int((available - 1) / 120) + 1
+    result.CenterPatternCount = UIQuoteCenterPatternCount(walls, length, height)
     result.SidePlantersPerWall = Int((width - 1) / 120) + 1
     result.CenterWallRuns = IIf(walls = 4, 2, 1)
     Select Case walls
@@ -61,18 +63,19 @@ Public Function UICalculateQuote(ByVal walls As Long, ByVal orientation As Strin
         Case 2: result.SideWallRuns = 1
         Case 3, 4: result.SideWallRuns = 2
     End Select
-    ' CONTINUATION_LENGTH = HEIGHT - DEPTH_OVERRIDE_DIMENSION + CENTER_PLANTER_LENGTH; it replaces the center length.
+    ' With the override on, CONTINUATION_LENGTH replaces the center length.
     result.ContinuationLength = result.CenterLength
     If widthOverridden Then
-        result.ContinuationLength = height - result.DepthDimension + result.CenterLength
+        result.ContinuationLength = UIQuoteContinuationLength(walls, result.CenterLength, height, _
+            result.DepthDimension, result.CenterPatternCount)
         If result.ContinuationLength <= 0 Then
             Err.Raise vbObjectError + 2400, "UICalculateQuote", "The baseplate width override leaves no center planter length. Use a smaller width."
         End If
     End If
     result.CenterGussets = UIQuoteGussets(result.ContinuationLength)
     result.SideGussets = UIQuoteGussets(result.SideLength)
-    result.SideMate = result.CenterLength / 2 + height / 2
-    result.SideMateRight = result.SideMate + (result.CenterPatternCount - 1) * result.CenterLength
+    result.SideMate = result.ContinuationLength / 2 + result.DepthDimension / 2
+    result.SideMateRight = result.SideMate + (result.CenterPatternCount - 1) * result.ContinuationLength
     If result.CenterPatternCount <> result.CenterSizingSegments Then
         result.Warnings = "Center sizing/pattern counts disagree: quantities require review." & vbCrLf
     End If
@@ -84,6 +87,30 @@ Public Function UICalculateQuote(ByVal walls As Long, ByVal orientation As Strin
     UIQuotePricing result, False, UIQuoteDefaultRate("Cut"), UIQuoteDefaultRate("Bend"), _
         UIQuoteDefaultRate("Weld"), UIQuoteDefaultRate("Paint"), UIQuoteDefaultRate("Margin")
     Set UICalculateQuote = result
+End Function
+
+' CENTER_WALL_PATTERN_COUNT = INT((available center run - 1) / 120) + 1.
+Public Function UIQuoteCenterPatternCount(ByVal walls As Long, ByVal length As Double, ByVal height As Double) As Long
+    Dim available As Double
+    Select Case walls
+        Case 1: available = length
+        Case 2: available = length - height / 2
+        Case Else: available = length - height
+    End Select
+    UIQuoteCenterPatternCount = Int((available - 1) / 120) + 1
+End Function
+
+' CONTINUATION_LENGTH = CENTER_PLANTER_LENGTH + OVERRIDE_ENDS * (HEIGHT - DEPTH_OVERRIDE_DIMENSION) / 2 / CENTER_WALL_PATTERN_COUNT,
+' where OVERRIDE_ENDS is 0, 1 or 2 for 1, 2 or 3-4 walls.
+Public Function UIQuoteContinuationLength(ByVal walls As Long, ByVal centerLength As Double, _
+    ByVal height As Double, ByVal depth As Double, ByVal patternCount As Long) As Double
+    Dim ends As Long
+    Select Case walls
+        Case 1: ends = 0
+        Case 2: ends = 1
+        Case Else: ends = 2
+    End Select
+    UIQuoteContinuationLength = centerLength + ends * (height - depth) / 2 / patternCount
 End Function
 
 Public Function UIQuoteParseQuantity(ByVal text As String) As Long
@@ -344,8 +371,17 @@ Private Sub UIQuoteComponents(ByVal result As UIQuoteResult)
     Dim parts(0 To 7) As UIQuoteComponent
     Dim i As Long
     Dim basis As Double
+    Dim leftEnds As Double
+    Dim rightEnds As Double
     centers = result.CenterPatternCount * result.CenterWallRuns
     sides = result.SidePlantersPerWall * result.SideWallRuns
+    leftEnds = result.SideWallRuns
+    rightEnds = result.SideWallRuns
+    ' With continuation the left run drops its LW and the right run drops its RW; a mounting gusset replaces each.
+    If result.ContinuationActive Then
+        If result.WallCount = 3 Or result.Orientation = "Left" Then leftEnds = leftEnds - 1
+        If result.WallCount = 3 Or result.Orientation = "Right" Then rightEnds = rightEnds - 1
+    End If
     basis = result.DepthDimension
     result.FlatHeight = UIQuoteFlatHeight(result.Height, result.Thickness, result.ReturnLabel)
     result.SideBlankLength = result.SideLength - 2 * result.Thickness
@@ -356,9 +392,9 @@ Private Sub UIQuoteComponents(ByVal result As UIQuoteResult)
     Set parts(1) = UIQuotePart(result, "Center Planter Base Plate", "Center", result.ContinuationLength, basis / 2, 0, centers, "CENTER_PLANTER_LENGTH (OVERALL_LENGTH) x DEPTH/2 (DEPTH = H unless base width is overridden)")
     Set parts(2) = UIQuotePart(result, "Side Planter Wall", "Side", result.SideBlankLength, result.FlatHeight, 0, sides, "(SIDE_PLANTER_LENGTH - 2*T) x calibrated flat height")
     Set parts(3) = UIQuotePart(result, "Side Planter Base Plate", "Side", result.SideBlankLength, basis / 2, 0, sides, "(SIDE_PLANTER_LENGTH - 2*T) x DEPTH/2 (DEPTH = H unless base width is overridden)")
-    Set parts(4) = UIQuotePart(result, "Left Side Wall", "Side ends", result.Height / 2, result.FlatHeight, 0, result.SideWallRuns, "H/2 x calibrated flat height; one per side run")
-    Set parts(5) = UIQuotePart(result, "Right Side Wall", "Side ends", result.Height / 2, result.FlatHeight, 0, result.SideWallRuns, "H/2 x calibrated flat height; one per side run")
-    Set parts(6) = UIQuotePart(result, "Mounting Gusset", "Shared", result.GussetHeight, result.GussetBottomWidth, result.GussetTopWidth, 2 * (centers + sides), "Height=DEPTH-2.1-T; bottom=DEPTH/2-T-0.5; top=bottom/3; qty=2 per planter (DEPTH = H unless base width is overridden)")
+    Set parts(4) = UIQuotePart(result, "Left Side Wall", "Side ends", result.Height / 2, result.FlatHeight, 0, leftEnds, "H/2 x calibrated flat height; one per side run (none on a continued left run)")
+    Set parts(5) = UIQuotePart(result, "Right Side Wall", "Side ends", result.Height / 2, result.FlatHeight, 0, rightEnds, "H/2 x calibrated flat height; one per side run (none on a continued right run)")
+    Set parts(6) = UIQuotePart(result, "Mounting Gusset", "Shared", result.GussetHeight, result.GussetBottomWidth, result.GussetTopWidth, 2 * (centers + sides) + 2 * result.SideWallRuns - leftEnds - rightEnds, "Height=DEPTH-2.1-T; bottom=DEPTH/2-T-0.5; top=bottom/3; qty=2 per planter + 1 per continued run (DEPTH = H unless base width is overridden)")
     Set parts(7) = UIQuotePart(result, "Center Gusset", "Shared", result.GussetHeight, result.GussetBottomWidth, result.GussetTopWidth, centers * (result.CenterGussets - 1) + sides * (result.SideGussets - 1), "Same profile as mounting; qty=centers*(CENTER_GUSSETS-1)+sides*(SIDE_GUSSETS-1)")
     result.Components = parts
     result.HasValidTotals = (Len(result.Warnings) = 0)
@@ -410,7 +446,11 @@ Public Function UIQuoteReport(ByVal result As UIQuoteResult) As String
             "; DEPTH_OVERRIDE_DIMENSION: " & UIInchesText(result.DepthDimension) & _
             "; CONTINUATION_LENGTH: " & UIInchesText(result.ContinuationLength) & vbCrLf
     End If
-    If result.MountsToPlanter Then text = text & "Mounts to another planter: yes" & vbCrLf
+    If result.ContinuationActive Then
+        text = text & "Mounts to another planter: yes (continued side ends use mounting gussets instead of end walls)" & vbCrLf
+    ElseIf result.MountsToPlanter Then
+        text = text & "Mounts to another planter: yes" & vbCrLf
+    End If
     If result.CustomCuts Or result.OverrideBaseWidth Then text = text & "Custom planter: part numbers end in -C<n>" & vbCrLf
     text = text & "CENTER_GUSSETS equation value: " & result.CenterGussets & vbCrLf & vbCrLf & _
         "Side wall runs: " & result.SideWallRuns & vbCrLf & _

@@ -16,8 +16,7 @@ TABLE = (ROOT / "src" / "UIDesignTableSession.cls").read_text(encoding="ascii")
 class ReferenceGuardContracts(unittest.TestCase):
     def test_guard_scope_and_cleanup(self):
         self.assertIn("GetDependencies(True, True, False, False, False)", GUARD)
-        self.assertIn("document.GetSaveFlag <> False", GUARD)
-        self.assertLess(GUARD.index("document.GetSaveFlag"), GUARD.index("app.SetUserPreferenceToggle"))
+        self.assertNotIn("GetSaveFlag", GUARD)
         self.assertIn("references.Exists(path)", GUARD)
         self.assertIn("template.GetPathName", GUARD)
         self.assertNotIn("Save3", GUARD)
@@ -181,14 +180,10 @@ app.includeReference = False
 guard.BeginGuard app, template
 app.includeReference = True
 reference.dirty = True
-On Error Resume Next
 guard.ProtectLoadedReferences
-number = Err.Number
-Err.Clear
-On Error GoTo 0
-Assert number <> 0 And reference.setCalls = 0, "Never discard untracked unsaved work"
+Assert reference.readOnly And reference.setCalls = 1, "Protect newly loaded reference despite unsaved changes"
 guard.Restore
-Assert app.preference = False, "Restore settings after unsafe newly loaded reference"
+Assert reference.readOnly = False And app.preference = False, "Restore settings after newly loaded dirty reference"
 Setup
 reference.readOnly = True
 app.preference = True
@@ -197,14 +192,12 @@ guard.Restore
 Assert reference.readOnly And app.preference, "Preserve original read-only and discard states"
 Setup
 reference.dirty = True
-On Error Resume Next
+template.dirty = True
 guard.BeginGuard app, template
-number = Err.Number
-Err.Clear
-On Error GoTo 0
-Assert number <> 0, "Block pre-existing unsaved reference work"
-Assert reference.setCalls = 0 And app.prefCalls = 0, "Preflight changes nothing"
+Assert reference.readOnly And app.preference, "Allow pre-existing unsaved template and reference work"
+Assert template.setCalls = 0 And unrelated.setCalls = 0, "Dirty template and unrelated documents are not made read-only"
 guard.Restore
+Assert reference.readOnly = False And app.preference = False, "Restore dirty reference original state"
 Setup
 reference.failProtect = True
 On Error Resume Next

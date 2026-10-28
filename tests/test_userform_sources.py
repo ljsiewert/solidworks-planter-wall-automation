@@ -62,7 +62,7 @@ class SourceContracts(unittest.TestCase):
         self.assertIn('FolderExists(root & packngo1.masterName & "-C" & CStr(serial)', check)
         self.assertIn("UIIsCustomPlanter()", check)
         names = helper_body("UIApplyActualDimensionNames")
-        for expected in ("2 * thickness", "centerHardwareName", "sharedSideName", "2 * (CDbl(designTableInputs(9)) + thickness)"):
+        for expected in ("2 * thickness", "centerHardwareName", "sharedSideName", "2 * (CDbl(designTableInputs(9)) + thickness)", "UIQuoteContinuationLength", "UIQuoteCenterPatternCount"):
             self.assertIn(expected, names)
         suffix = helper_body("UIAppendNameSuffix")
         self.assertIn("packngo1.customSuffix = suffix", suffix)
@@ -86,8 +86,8 @@ class SourceContracts(unittest.TestCase):
         self.assertIn("configurationName, errors, warnings", MODULE)
         self.assertNotIn("template.Save", MODULE)
         self.assertIn("packngo1.swApp.CloseDoc templatePath", MODULE)
-        self.assertIn("UIRequireCleanTemplate packngo1.swModel", MODULE)
-        self.assertIn("UIRequireCleanTemplate template", MODULE)
+        self.assertNotIn("UIRequireCleanTemplate", MODULE)
+        self.assertNotIn("GetSaveFlag", MODULE)
         self.assertIn("Public Sub CloseEditor()", TABLE)
         self.assertNotIn("Public Sub Restore()", TABLE)
         self.assertNotIn("originals", TABLE)

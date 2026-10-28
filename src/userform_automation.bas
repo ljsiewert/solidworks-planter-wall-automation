@@ -69,7 +69,6 @@ Public Sub RunWithUI()
             UIShowFieldQuote quoteDesigns
         Else
             If Not packngo1.Step1_Initialize() Then GoTo Finished
-            UIRequireCleanTemplate packngo1.swModel
             If StrComp(packngo1.GetFileName(packngo1.swModel.GetPathName), _
                        "planter_assembly.SLDASM", vbTextCompare) <> 0 Then
                 Err.Raise UI_ERROR, "RunWithUI", "Start model mode from the original planter_assembly.SLDASM template."
@@ -118,7 +117,6 @@ Public Sub UIPreviewQuoteDesign(ByVal result As UIQuoteResult)
     previousOutput = outputFolder
     On Error GoTo Failed
     If Not packngo1.Step1_Initialize() Then GoTo Finished
-    UIRequireCleanTemplate packngo1.swModel
     If StrComp(packngo1.GetFileName(packngo1.swModel.GetPathName), _
                "planter_assembly.SLDASM", vbTextCompare) <> 0 Then
         Err.Raise UI_ERROR, "UIPreviewQuoteDesign", "Start preview from the original planter_assembly.SLDASM template."
@@ -162,7 +160,6 @@ Private Sub UIRunPreview()
     outputFolder = ""
     packngo1.destFolder = ""
     Set template = packngo1.swModel
-    UIRequireCleanTemplate template
     Set runLogger = New UIRunLogger
     runLogger.BeginRun UI_LOG_FOLDER
     logPath = runLogger.Path
@@ -267,14 +264,6 @@ Private Function UIProgressPlan() As Collection
     If exportPDFComponents Then plan.Add "Running component PDF exporter"
     Set UIProgressPlan = plan
 End Function
-
-Public Sub UIRequireCleanTemplate(ByVal model As SldWorks.ModelDoc2)
-    If model.GetSaveFlag <> False Then
-        Err.Raise UI_ERROR, "UIRequireCleanTemplate", _
-            "The original template already has unsaved changes." & vbCrLf & _
-            "Save or discard them manually, then reopen a clean template before running UI mode."
-    End If
-End Sub
 
 Public Function UIYesNo(ByVal flag As Boolean) As String
     If flag Then UIYesNo = "YES" Else UIYesNo = "NO"
@@ -497,7 +486,9 @@ Public Sub UIApplyActualDimensionNames()
     packngo1.sharedSideName = "S" & pnSide & tail
     If UBound(designTableInputs) >= 9 Then
         If designTableInputs(8) = "YES" Then
-            continuation = CDbl(packngo1.overallHeight) - 2 * (CDbl(designTableInputs(9)) + thickness) + CDbl(packngo1.centerPlanterLength)
+            continuation = UIQuoteContinuationLength(CLng(packngo1.wallCount), CDbl(packngo1.centerPlanterLength), _
+                CDbl(packngo1.overallHeight), 2 * (CDbl(designTableInputs(9)) + thickness), _
+                UIQuoteCenterPatternCount(CLng(packngo1.wallCount), CDbl(packngo1.overallLength), CDbl(packngo1.overallHeight)))
             If continuation <= 0 Then
                 Err.Raise UI_ERROR, "UIApplyActualDimensionNames", "The baseplate width override leaves no center planter length."
             End If
@@ -755,7 +746,6 @@ Private Sub UIRunAutomation()
     Set progress = New UIProgressSession
     progress.BeginRun UIProgressPlan()
     Set template = packngo1.swModel
-    UIRequireCleanTemplate template
     templatePath = template.GetPathName
     UITraceDetail "Template", templatePath
     UITraceDetail "SolidWorks revision", packngo1.swApp.RevisionNumber

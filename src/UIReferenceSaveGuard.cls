@@ -51,16 +51,11 @@ Public Sub BeginGuard(ByVal application As SldWorks.SldWorks, ByVal template As 
         Err.Raise GUARD_ERROR, "UIReferenceSaveGuard", "Cannot inspect open documents before automatic discard."
     End If
 
-    ' Validate every affected loaded reference before changing any document state.
+    ' Snapshot affected references before changing any document state.
     For i = LBound(documents) To UBound(documents)
         Set document = documents(i)
         path = document.GetPathName
         If references.Exists(path) And StrComp(path, template.GetPathName, vbTextCompare) <> 0 Then
-            If document.GetSaveFlag <> False Then
-                Err.Raise GUARD_ERROR, "UIReferenceSaveGuard", _
-                    "This template reference already has unsaved changes:" & vbCrLf & path & _
-                    vbCrLf & "Save or discard those changes manually before running UI mode."
-            End If
             paths.Add path
             readOnlyStates.Add CBool(document.IsOpenedReadOnly)
             tracked(path) = True
@@ -108,11 +103,6 @@ Public Sub ProtectLoadedReferences()
         path = document.GetPathName
         If references.Exists(path) And StrComp(path, templatePath, vbTextCompare) <> 0 Then
             If Not tracked.Exists(path) Then
-                If document.GetSaveFlag <> False Then
-                    Err.Raise GUARD_ERROR, "UIReferenceSaveGuard", _
-                        "A newly loaded reference has unsaved changes and was not checked at startup:" & _
-                        vbCrLf & path & vbCrLf & "Automatic discard is unsafe; review this document manually."
-                End If
                 paths.Add path
                 readOnlyStates.Add CBool(document.IsOpenedReadOnly)
                 tracked(path) = True

@@ -76,9 +76,9 @@ class FieldEditorTests(unittest.TestCase):
     def test_selected_preview_reuses_guards_and_restores_field_context(self):
         preview = procedure(MODULE, "UIPreviewQuoteDesign")
         self.assertIn("packngo1.Step1_Initialize()", preview)
-        self.assertIn("UIRequireCleanTemplate packngo1.swModel", preview)
+        self.assertNotIn("UIRequireCleanTemplate", preview)
         self.assertIn('"planter_assembly.SLDASM"', preview)
-        self.assertLess(preview.index("UIRequireCleanTemplate"), preview.index("UIMapSelections"))
+        self.assertLess(preview.index('"planter_assembly.SLDASM"'), preview.index("UIMapSelections"))
         self.assertIn("UIRunPreview", preview)
         for forbidden in ("Step8", "UIRunAutomation", "Save3", "OpenDoc6", "UICreateDestination"):
             self.assertNotIn(forbidden, preview)

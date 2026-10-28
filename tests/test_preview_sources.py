@@ -17,7 +17,8 @@ class PreviewTests(unittest.TestCase):
         for forbidden in ("SavePackAndGo", "UICheckDestination", "UICreateDestination",
                           "UIRunExport", "CloseDoc", "Save3", "OpenDoc6"):
             self.assertNotIn(forbidden, preview)
-        self.assertIn("UIRequireCleanTemplate template", preview)
+        self.assertNotIn("UIRequireCleanTemplate", preview)
+        self.assertNotIn("GetSaveFlag", preview)
         self.assertIn("tableSession.Apply template, designTableInputs, expected", preview)
         self.assertIn("UIReadCalculatedGlobals template, expected", preview)
         self.assertIn("saveGuard.Restore", preview)
