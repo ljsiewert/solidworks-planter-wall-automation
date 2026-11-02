@@ -18,6 +18,7 @@ Private WithEvents updatePlanterButton As MSForms.CommandButton
 Private WithEvents newPlanterButton As MSForms.CommandButton
 Private WithEvents planterList As MSForms.ListBox
 Private WithEvents overrideBox As MSForms.CheckBox
+Private WithEvents exportsOnlyBox As MSForms.CheckBox
 
 Private mountBox As MSForms.CheckBox
 Private customBox As MSForms.CheckBox
@@ -86,7 +87,7 @@ Private Sub UserForm_Initialize()
     End With
     paintedToggle_Click
     Set thicknessBox = AddCombo("cboThickness", "Material thickness", 226, Array("3/16 inch", "1/4 inch"))
-    Set folderBox = AddText("txtOutputFolder", "Output parent folder", 256, packngo1.packTestFolder)
+    Set folderBox = AddText("txtOutputFolder", "Output parent folder", 256, "")
     folderBox.Width = 220
     Set browseButton = AddButton("cmdBrowse", "...", 403, 256, 35)
 
@@ -108,6 +109,9 @@ Private Sub UserForm_Initialize()
     Set pdfComponentsBox = AddCheck("chkPDFComponents", "PDF components", 235, 406)
     Set dxfBox = AddCheck("chkDXF", "DXF files", 16, 432)
     Set stepBox = AddCheck("chkSTEP", "STEP files", 235, 432)
+    Set exportsOnlyBox = AddCheck("chkExportsOnly", "Exports only (no model changes)", 16, 374)
+    exportsOnlyBox.ControlTipText = "Rerun mode: run only the checked exports on the open output assembly."
+    exportsOnlyBox.Enabled = False
 
     Set note = Me.Controls.Add("Forms.Label.1", "lblNotes", True)
     note.Caption = "Quote rates, gap and margins are under Properties; defaults are provisional." & vbCrLf & _
@@ -202,6 +206,66 @@ Private Sub UserForm_Initialize()
     Select Case packngo1.thicknessLabel
         Case "1", "2": thicknessBox.ListIndex = CLng(packngo1.thicknessLabel) - 1
     End Select
+    If Len(rerunPath) > 0 Then ApplyRerunInputs
+End Sub
+
+' Rerun mode: the form starts from the open output assembly's own inputs.
+Private Sub ApplyRerunInputs()
+    Dim fso As Object
+    wallsBox.Value = CStr(rerunInputs(0))
+    wallsBox_Change
+    If sideBox.Enabled Then sideBox.Value = CStr(rerunInputs(1))
+    returnBox.Value = CStr(rerunInputs(2))
+    lengthBox.Text = CStr(rerunInputs(3))
+    widthBox.Text = CStr(rerunInputs(4))
+    heightBox.Text = CStr(rerunInputs(5))
+    materialBox.Value = CStr(rerunInputs(6))
+    thicknessBox.Value = CStr(rerunInputs(7))
+    If mountBox.Enabled Then mountBox.Value = CBool(rerunInputs(8))
+    ' overrideBox_Click clears the width, so set the checkbox first.
+    overrideBox.Value = CBool(rerunInputs(9))
+    overrideBox_Click
+    If overrideBox.Value Then baseWidthBox.Text = CStr(rerunInputs(10))
+    customBox.Value = True
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    folderBox.Text = fso.GetParentFolderName(fso.GetParentFolderName(rerunPath))
+    Me.Caption = "Planter Wall Automation - Rerun " & Mid$(rerunPath, InStrRev(rerunPath, "\") + 1)
+    Me.Controls("lblNotes").Caption = "RERUN: copies this output into a NEW part-number folder (always -C<n>), " & _
+        "keeping custom cuts and the original folder." & vbCrLf & _
+        "Exports only runs the checked exports without changing the model."
+    ApplyModeLocks
+End Sub
+
+' Rerun mode keeps preview and custom naming fixed; Exports only also locks inputs and destination.
+Private Sub ApplyModeLocks()
+    Dim locked As Boolean
+    If exportsOnlyBox Is Nothing Then Exit Sub
+    If Len(rerunPath) = 0 Then
+        exportsOnlyBox.Enabled = False
+        Exit Sub
+    End If
+    previewBox.Enabled = False
+    folderBox.Enabled = Not exportsOnlyBox.Value And Not quoteBox.Value
+    browseButton.Enabled = folderBox.Enabled
+    customBox.Enabled = False
+    exportsOnlyBox.Enabled = Not quoteBox.Value
+    locked = exportsOnlyBox.Value
+    quoteBox.Enabled = Not locked
+    wallsBox.Enabled = Not locked
+    sideBox.Enabled = Not locked And wallsBox.Value = "2"
+    returnBox.Enabled = Not locked
+    lengthBox.Enabled = Not locked
+    widthBox.Enabled = Not locked
+    heightBox.Enabled = Not locked
+    materialBox.Enabled = Not locked
+    thicknessBox.Enabled = Not locked
+    mountBox.Enabled = Not locked And wallsBox.Value <> "4"
+    overrideBox.Enabled = Not locked
+    baseWidthBox.Enabled = Not locked And overrideBox.Value
+End Sub
+
+Private Sub exportsOnlyBox_Click()
+    ApplyModeLocks
 End Sub
 
 ' Properties panel: an overlay frame so quote settings stay adjustable without cluttering the form.
@@ -456,6 +520,7 @@ Private Sub quoteBox_Click()
     Else
         runButton.Caption = "Run"
     End If
+    ApplyModeLocks
 End Sub
 
 Private Sub addPlanterButton_Click()
@@ -603,6 +668,26 @@ Private Sub runButton_Click()
         Me.Hide
         Exit Sub
     End If
+    If exportsOnlyBox.Value Then
+        exportPDFAssemblies = CBool(pdfAssembliesBox.Value)
+        exportPDFComponents = CBool(pdfComponentsBox.Value)
+        exportDXF = CBool(dxfBox.Value)
+        exportSTEP = CBool(stepBox.Value)
+        If Not (exportPDFAssemblies Or exportPDFComponents Or exportDXF Or exportSTEP) Then
+            Err.Raise vbObjectError + 2100, , "Choose at least one export for Exports only."
+        End If
+        Set quoteValues = Nothing
+        Set quoteDesigns = Nothing
+        quoteOnly = False
+        previewOnly = False
+        outputFolder = ""
+        exportsOnly = True
+        UICheckExportFiles
+        acceptedValue = True
+        Me.Hide
+        Exit Sub
+    End If
+    exportsOnly = False
     If wallsBox.ListIndex < 0 Then
         Err.Raise vbObjectError + 2100, , "Choose a wall count."
     End If

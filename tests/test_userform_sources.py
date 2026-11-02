@@ -495,10 +495,11 @@ ExpectBadSelection 1, "N/A", returns(0), "Aluminum", thicknesses(0)
 ExpectBadSelection 1, "N/A", returns(0), materials(0), "1/8 inch"
 Set fso = CreateObject("Scripting.FileSystemObject")
 root = WScript.Arguments(0)
-Assert UIOutputRoot(root) = root & "\PACK_TEST\", "Output root should gain PACK_TEST"
-Assert UIOutputRoot(root & "\PACK_TEST") = root & "\PACK_TEST\", "Do not duplicate PACK_TEST"
-Assert LCase(UIOutputRoot(root & "\pack_test")) = LCase(root & "\pack_test\"), "Case insensitive marker"
-Assert UIOutputRoot(root & "\not_PACK_TEST") = root & "\not_PACK_TEST\PACK_TEST\", "Use whole path segments"
+Assert UIOutputRoot(root) = root & "\", "Use selected parent directly"
+Assert UIOutputRoot(root & "\PACK_TEST") = root & "\PACK_TEST\", "Keep explicitly selected PACK_TEST folder"
+Assert LCase(UIOutputRoot(root & "\pack_test")) = LCase(root & "\pack_test\"), "Preserve selected folder"
+Assert UIOutputRoot(root & "\not_PACK_TEST") = root & "\not_PACK_TEST\", "Do not add nested output folders"
+Assert UIOutputRoot(root & "\") = root & "\", "Preserve trailing separator"
 On Error Resume Next
 ignored = UIOutputRoot(root & "\missing")
 actual = Err.Number

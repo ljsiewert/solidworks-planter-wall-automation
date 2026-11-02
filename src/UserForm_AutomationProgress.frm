@@ -56,7 +56,7 @@ End Function
 Private Sub UserForm_QueryClose(Cancel As Integer, CloseMode As Integer)
     If CloseMode = vbFormControlMenu Then
         Cancel = True
-        MsgBox "The workflow is still running. This window is not a cancellation control.", _
-               vbInformation, "Automation Progress"
+        stageLabel.Caption = "Workflow still running. Use ESC during an export to request cancellation."
+        Me.Repaint
     End If
 End Sub

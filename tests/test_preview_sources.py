@@ -34,15 +34,19 @@ class PreviewTests(unittest.TestCase):
     def test_checkbox_transitions_and_defensive_export_reset(self):
         methods = []
         for source, name in ((FORM, "previewBox_Click"), (FORM, "quoteBox_Click"),
+                             (FORM, "ApplyModeLocks"), (FORM, "exportsOnlyBox_Click"),
                              (MODULE, "UIDisableExports")):
             body = re.search(rf"^(?:Private|Public) Sub {name}\(\).*?^End Sub$",
                              source, re.MULTILINE | re.DOTALL)[0]
+            body = body.replace(" As Boolean", "")
             methods.append(body.replace("Private Sub", "Sub").replace("Public Sub", "Sub"))
         script = r'''
 Option Explicit
 Dim previewBox, quoteBox, folderBox, browseButton, pdfAssembliesBox, pdfComponentsBox, dxfBox, stepBox, priceBox, gapBox, marginBox
 Dim quoteOnly, exportPDFAssemblies, exportPDFComponents, exportDXF, exportSTEP
 Dim fieldDesigns, quantityBox, designNameBox, addPlanterButton, removePlanterButton, updatePlanterButton, newPlanterButton, planterList, runButton
+Dim exportsOnlyBox, rerunPath, customBox, wallsBox, sideBox, returnBox, lengthBox, widthBox, heightBox
+Dim materialBox, thicknessBox, mountBox, overrideBox, baseWidthBox, item
 Class Control
     Public Value, Enabled, Caption, ListIndex
 End Class
@@ -77,6 +81,23 @@ Set newPlanterButton = New Control
 Set planterList = New Control
 planterList.ListIndex = -1
 Set runButton = New Control
+Set exportsOnlyBox = New Control
+exportsOnlyBox.Value = False
+rerunPath = ""
+Set customBox = New Control
+Set wallsBox = New Control
+Set sideBox = New Control
+Set returnBox = New Control
+Set lengthBox = New Control
+Set widthBox = New Control
+Set heightBox = New Control
+Set materialBox = New Control
+Set thicknessBox = New Control
+Set mountBox = New Control
+Set overrideBox = New Control
+Set baseWidthBox = New Control
+wallsBox.Value = "2"
+overrideBox.Value = False
 '''
         script += "\n".join(methods) + r'''
 quoteBox.Value = True
@@ -107,6 +128,28 @@ quoteBox.Value = False
 quoteBox_Click
 Assert folderBox.Enabled And previewBox.Enabled And pdfAssembliesBox.Enabled, "Leaving quote reenables controls"
 Assert Not pdfAssembliesBox.Value, "Leaving quote does not reselect PDFs"
+Assert Not exportsOnlyBox.Enabled, "Exports only needs a rerun source"
+rerunPath = "Z:\out\20-0-C10000-S6000-1200-11-C1\20-0-C10000-S6000-1200-11-C1.SLDASM"
+quoteBox_Click
+Assert exportsOnlyBox.Enabled And Not previewBox.Enabled And folderBox.Enabled And browseButton.Enabled, "Rerun locks preview but allows destination"
+Assert Not customBox.Enabled And wallsBox.Enabled And sideBox.Enabled And Not baseWidthBox.Enabled, "Rerun keeps model inputs editable"
+exportsOnlyBox.Value = True
+exportsOnlyBox_Click
+For Each item In Array(quoteBox, wallsBox, sideBox, returnBox, lengthBox, widthBox, heightBox, materialBox, thicknessBox, mountBox, overrideBox, baseWidthBox)
+    Assert Not item.Enabled, "Exports only locks model inputs"
+Next
+Assert pdfAssembliesBox.Enabled And dxfBox.Enabled And stepBox.Enabled, "Exports only keeps export choices"
+Assert Not folderBox.Enabled And Not browseButton.Enabled, "Exports only locks destination"
+exportsOnlyBox.Value = False
+exportsOnlyBox_Click
+Assert quoteBox.Enabled And lengthBox.Enabled And Not previewBox.Enabled, "Leaving exports only unlocks inputs"
+Assert folderBox.Enabled And browseButton.Enabled, "Leaving exports only unlocks destination"
+quoteBox.Value = True
+quoteBox_Click
+Assert Not exportsOnlyBox.Enabled, "Quote disables exports only"
+quoteBox.Value = False
+quoteBox_Click
+rerunPath = ""
 quoteOnly = True
 exportPDFAssemblies = True
 exportPDFComponents = True

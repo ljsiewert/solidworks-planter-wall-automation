@@ -81,7 +81,7 @@ Public Sub Complete()
     End If
     durations(current) = DateDiff("s", stageStarted, Now)
     UITraceEnd "Stage: " & CStr(stages(current))
-    form.UpdateProgress "Workflow returned; review export dialogs/logs for results.", _
+    form.UpdateProgress "Workflow returned; review export status/logs for results.", _
                         stages.Count, stages.Count, DateDiff("s", started, Now), 0
     SaveTimings
     CloseWindow

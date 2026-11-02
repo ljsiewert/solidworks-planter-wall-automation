@@ -13,6 +13,10 @@ Public exportSTEP As Boolean
 Public outputFolder As String
 Public designTableInputs As Variant
 Public customCuts As Boolean
+' Set by UIDetectRerunSource when the active document is a packed output assembly.
+Public rerunPath As String
+Public rerunInputs As Variant
+Public exportsOnly As Boolean
 
 ' These are referenced, but not declared, by the supplied packngo1 source.
 Public filteredExcludedFiles As Boolean
@@ -48,6 +52,18 @@ Public Sub UITraceDetail(ByVal name As String, ByVal text As String)
     If Not runLogger Is Nothing Then runLogger.Detail name, text
 End Sub
 
+Public Function UIStartRunLog() As String
+    Set runLogger = New UIRunLogger
+    runLogger.BeginRun UI_LOG_FOLDER
+    UIStartRunLog = runLogger.Path
+End Function
+
+Public Sub UIEndRunLog(ByVal result As String, ByVal message As String)
+    If runLogger Is Nothing Then Exit Sub
+    runLogger.Finish result, message
+    Set runLogger = Nothing
+End Sub
+
 Public Sub RunWithUI()
     Dim form As UserForm_AutomationUI
 
@@ -60,6 +76,8 @@ Public Sub RunWithUI()
     uiRunning = True
     Set quoteValues = Nothing
     Set quoteDesigns = Nothing
+    exportsOnly = False
+    UIDetectRerunSource
     Set form = New UserForm_AutomationUI
     form.Show vbModal
     If form.Accepted Then
@@ -69,11 +87,22 @@ Public Sub RunWithUI()
             UIShowFieldQuote quoteDesigns
         Else
             If Not packngo1.Step1_Initialize() Then GoTo Finished
+            packngo1.destFolder = ""
+            If Len(rerunPath) > 0 Then
+                If StrComp(packngo1.swModel.GetPathName, rerunPath, vbTextCompare) <> 0 Then
+                    Err.Raise UI_ERROR, "RunWithUI", "The active assembly changed while the form was open. Run the macro again."
+                End If
+                If exportsOnly Then
+                    UIRunExportsOnly
+                Else
+                    UIRunRerun
+                End If
+                GoTo Finished
+            End If
             If StrComp(packngo1.GetFileName(packngo1.swModel.GetPathName), _
                        "planter_assembly.SLDASM", vbTextCompare) <> 0 Then
                 Err.Raise UI_ERROR, "RunWithUI", "Start model mode from the original planter_assembly.SLDASM template."
             End If
-            packngo1.destFolder = ""
             If previewOnly Then
                 UIRunPreview
             Else
@@ -185,12 +214,10 @@ Private Sub UIRunPreview()
     saveGuard.Restore
     template.ViewZoomtofit2
     progress.Complete
-    runLogger.Finish "PREVIEW", "Template left open and unsaved. No Pack-and-Go or exports."
+    runLogger.Finish "PREVIEW", "Template left open and unsaved. No Pack-and-Go or exports. " & _
+        "Do not save the template; close without saving and reopen before another run."
     Set runLogger = Nothing
-    MsgBox "Preview ready. The template is open with unsaved design changes." & vbCrLf & _
-        "No model copies or exports were created." & vbCrLf & _
-        "Do not save the template. Close it without saving and reopen before another preview or full run." & _
-        vbCrLf & "Run log: " & logPath, vbInformation, "Model Preview"
+    packngo1.swApp.Frame.SetStatusBarText "Preview ready. Do not save the template; close without saving and reopen before another run. Log: " & logPath
     Exit Sub
 Failed:
     failure = Err.Description
@@ -363,9 +390,6 @@ Public Function UIOutputRoot(ByVal selectedFolder As String) As String
     End If
     root = fso.GetAbsolutePathName(root)
     If Right$(root, 1) <> "\" Then root = root & "\"
-    If InStr(1, "\" & root, "\PACK_TEST\", vbTextCompare) = 0 Then
-        root = root & "PACK_TEST\"
-    End If
     UIOutputRoot = root
 End Function
 
@@ -561,7 +585,7 @@ Public Sub UIVerifyDesignTableModel(ByVal model As SldWorks.ModelDoc2, ByVal exp
     Next i
 End Sub
 
-Private Sub UIReadCalculatedGlobals(ByVal model As SldWorks.ModelDoc2, ByVal expected As Variant)
+Public Sub UIReadCalculatedGlobals(ByVal model As SldWorks.ModelDoc2, ByVal expected As Variant)
     Dim requested As Variant
     Dim i As Long
     requested = Array(packngo1.wallCount, packngo1.side, packngo1.returnType, _
@@ -634,7 +658,7 @@ Private Sub UICheckSaveStatuses(ByVal statuses As Variant)
     Next i
 End Sub
 
-Private Sub UIRunExport(ByVal packed As SldWorks.ModelDoc2, _
+Public Sub UIRunExport(ByVal packed As SldWorks.ModelDoc2, _
                        ByVal file As String, ByVal procedure As String)
     Dim activated As SldWorks.ModelDoc2
     Dim errors As Long
@@ -860,14 +884,12 @@ Private Sub UIRunAutomation()
         UIRunExport packed, "pdfcomponents.swp", "RunPDFComponentDrawings"
     End If
     progress.Complete
-    runLogger.Finish "FINISHED", "Workflow returned; export success must be checked in exporter dialogs/logs."
+    runLogger.Finish "FINISHED", "Pack-and-Go saved to " & packngo1.destFolder & _
+        ". Original template closed without saving. Review exporter status/logs for export results."
     Set runLogger = Nothing
 
-    MsgBox "Pack-and-Go saved to:" & vbCrLf & packngo1.destFolder & vbCrLf & vbCrLf & _
-           "Selected export macros have returned. Review their dialogs and logs for export results." & _
-           vbCrLf & "The original template was closed without saving." & _
-           vbCrLf & "Run log: " & logPath, _
-           vbInformation, "UI Workflow Finished"
+    packngo1.swApp.Frame.SetStatusBarText "Pack-and-Go saved to " & packngo1.destFolder & _
+        ". Selected exports returned; review exporter status/logs. Run log: " & logPath
     Exit Sub
 
 Failed:
@@ -909,7 +931,7 @@ Failed:
            vbCritical, "Reference Save Settings"
 End Function
 
-Private Function UICloseTableEditor(ByVal session As UIDesignTableSession) As Boolean
+Public Function UICloseTableEditor(ByVal session As UIDesignTableSession) As Boolean
     On Error GoTo Failed
     session.CloseEditor
     UICloseTableEditor = True

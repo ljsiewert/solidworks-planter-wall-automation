@@ -36,7 +36,7 @@ class ProgressSourceTests(unittest.TestCase):
         for operation in ("tableSession.Apply", "SavePackAndGo", "CloseDoc templatePath",
                           "OpenDoc6", "packed.ForceRebuild3"):
             self.assertIn(operation, workflow)
-        self.assertLess(workflow.index("progress.Complete"), workflow.index('MsgBox "Pack-and-Go'))
+        self.assertLess(workflow.index("progress.Complete"), workflow.index('SetStatusBarText "Pack-and-Go'))
 
     def test_display_and_failure_contracts(self):
         self.assertIn("form.Show vbModeless", SESSION)

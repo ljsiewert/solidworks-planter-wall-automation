@@ -104,7 +104,7 @@ Sub RunDXFComponentDrawings()
     End If
 
     If swModel.GetType <> swDocASSEMBLY Then
-        MsgBox "Please run this from the packed assembly (from PACK_TEST folder).", vbExclamation
+        MsgBox "Please run this from the packed output assembly.", vbExclamation
         Exit Sub
     End If
 
@@ -118,11 +118,8 @@ Sub RunDXFComponentDrawings()
     destFolder = Left(assemblyPath, InStrRev(assemblyPath, "\") - 1) & "\"
     dxfFolder = destFolder & "DXF\"
 
-    ' Verify this is a Pack and Go folder
-    If InStr(1, destFolder, "PACK_TEST", vbTextCompare) = 0 Then
-        MsgBox "This assembly does not appear to be from a Pack and Go output folder." & vbCrLf & vbCrLf & _
-               "Please open the assembly from:" & vbCrLf & _
-               "Z:\...\PACK_TEST\<part_number>\", vbExclamation
+    If StrComp(Mid$(assemblyPath, InStrRev(assemblyPath, "\") + 1), "planter_assembly.SLDASM", vbTextCompare) = 0 Then
+        MsgBox "Open the packed output assembly, not the original planter_assembly.SLDASM template.", vbExclamation
         Exit Sub
     End If
 
@@ -158,12 +155,8 @@ Sub RunDXFComponentDrawings()
         Exit Sub
     End If
 
-    MsgBox "Found " & activeParts.count & " active part components." & vbCrLf & _
-           "Exporting flat patterns to DXF..." & vbCrLf & vbCrLf & _
-           "Folder: " & dxfFolder & vbCrLf & vbCrLf & _
-           "Non-sheet-metal parts will be skipped automatically." & vbCrLf & vbCrLf & _
-           "Press ESC at any time to cancel after the current part finishes." & vbCrLf & vbCrLf & _
-           "This may take a few minutes.", vbInformation, "Starting DXF Export"
+    swApp.Frame.SetStatusBarText "Exporting DXF flat patterns for " & activeParts.count & _
+        " active parts. Non-sheet-metal parts are skipped. Press ESC to cancel after the current part."
 
     successCount = 0
     failureCount = 0
@@ -189,18 +182,12 @@ Sub RunDXFComponentDrawings()
         End Select
     Next i
 
-    If wasCancelled Then
-        MsgBox "DXF export cancelled by user." & vbCrLf & vbCrLf & _
-               "Successfully exported before cancelling: " & successCount & " of " & activeParts.count & vbCrLf & _
-               "Skipped (not sheet metal): " & skippedCount & vbCrLf & _
-               "Failed: " & failureCount & vbCrLf & vbCrLf & _
-               "Files saved to:" & vbCrLf & dxfFolder, vbExclamation, "Cancelled"
-    Else
-        MsgBox "DXF flat pattern export complete!" & vbCrLf & vbCrLf & _
-               "Successfully exported: " & successCount & vbCrLf & _
-               "Skipped (not sheet metal): " & skippedCount & vbCrLf & _
-               "Failed: " & failureCount & vbCrLf & vbCrLf & _
-               "Files saved to:" & vbCrLf & dxfFolder, vbInformation, "Complete"
+    swApp.Frame.SetStatusBarText IIf(wasCancelled, "DXF export cancelled.", "DXF export finished.") & _
+        " Exported: " & successCount & "; skipped: " & skippedCount & "; failed: " & failureCount & ". Folder: " & dxfFolder
+    If failureCount > 0 Then
+        MsgBox "DXF export had failures." & vbCrLf & _
+               "Exported: " & successCount & "; skipped: " & skippedCount & "; failed: " & failureCount & vbCrLf & _
+               "Folder: " & dxfFolder, vbExclamation, "DXF Export Failures"
     End If
 
 End Sub

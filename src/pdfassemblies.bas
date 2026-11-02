@@ -6,14 +6,9 @@ Option Explicit
 ' Module: pdfassemblies1
 ' Action: Tools > Macro > Edit on pdfassemblies.swp, select all code in
 '         module pdfassemblies1, delete, paste this file's content in, save.
-' Changed: ProcessMainAssemblyViews - IMPORTANT FIX. The live version uses
-'         old fixed SetPosition coordinates for Top/Front/Isometric views,
-'         which is the exact bug that made views visually shift at
-'         different scales. Replaced with outline-based centering plus an
-'         anchor-to-outline offset correction (View.Position is an
-'         internal anchor point, not the bounding-box corner, and that
-'         gap scales with view scale). New measured center coordinates:
-'         Top (5.31, 6.27), Front (5.31, 2.78), Isometric (11.29, 8.51) in.
+'         Also import PDFDrawingTools.bas into this project.
+' Changed: Active export uses measured sheet/view/annotation bounds,
+'         a common scale per sheet, and one checked native PDF export.
 ' Changed 2: Added swApp.UserControlBackground = True/False around the
 '         drawing processing loop so drawings open/close silently in the
 '         background (no window flashing/stealing focus) - faster and
@@ -128,7 +123,7 @@ Sub RunPDFAssemblyDrawings()
      End If
 
      If swModel.GetType <> swDocASSEMBLY Then
-         MsgBox "Please run this from the main assembly (from PACK_TEST folder).", vbExclamation
+         MsgBox "Please run this from the packed main assembly.", vbExclamation
          Exit Sub
      End If
 
@@ -161,12 +156,9 @@ Sub RunPDFAssemblyDrawings()
      LogWrite "Destination Folder: " & destFolder
      LogWrite ""
 
-     ' Verify this is a Pack and Go folder
-     If InStr(1, destFolder, "PACK_TEST", vbTextCompare) = 0 Then
-         LogWrite "ERROR: Not a PACK_TEST folder!"
-         MsgBox "This assembly does not appear to be from a Pack and Go output folder." & vbCrLf & vbCrLf & _
-                "Please open the assembly from:" & vbCrLf & _
-                "Z:\...\PACK_TEST\<part_number>\", vbExclamation
+     If StrComp(Mid$(assemblyPath, InStrRev(assemblyPath, "\") + 1), "planter_assembly.SLDASM", vbTextCompare) = 0 Then
+         LogWrite "ERROR: Original template selected instead of packed output."
+         MsgBox "Open the packed output assembly, not the original planter_assembly.SLDASM template.", vbExclamation
          Exit Sub
      End If
 
@@ -207,11 +199,8 @@ Sub RunPDFAssemblyDrawings()
      End If
 
      LogWrite ""
-     MsgBox "Found " & drawingCount & " sub-assembly drawings." & vbCrLf & _
-            "Processing sub-assemblies..." & vbCrLf & vbCrLf & _
-            "Folder: " & destFolder & vbCrLf & vbCrLf & _
-            "Press ESC at any time to cancel after the current drawing finishes." & vbCrLf & vbCrLf & _
-            "This may take a few minutes.", vbInformation, "Starting Sub-Assembly PDF Export"
+     swApp.Frame.SetStatusBarText "Exporting " & drawingCount & _
+         " assembly drawings to PDF. Press ESC to cancel after the current drawing."
 
      LogWrite "Starting PDF export processing..."
      LogWrite ""
@@ -255,15 +244,12 @@ Sub RunPDFAssemblyDrawings()
      LogWrite "End Time: " & Format(Now, "yyyy-mm-dd HH:mm:ss")
      LogWrite "Log file: " & logFilePath
 
-     If wasCancelled Then
-         MsgBox "Sub-assembly PDF export cancelled by user." & vbCrLf & vbCrLf & _
-                "Successfully processed before cancelling: " & successCount & " of " & drawingCount & vbCrLf & vbCrLf & _
-                "Log file: " & logFilePath, vbExclamation, "Cancelled"
-     Else
-         MsgBox "Sub-assembly PDF export complete!" & vbCrLf & vbCrLf & _
-                "Successfully processed: " & successCount & vbCrLf & _
-                "Failed: " & failureCount & vbCrLf & vbCrLf & _
-                "Log file: " & logFilePath, vbInformation, "Complete"
+     swApp.Frame.SetStatusBarText IIf(wasCancelled, "Assembly PDF export cancelled.", "Assembly PDF export finished.") & _
+         " Created: " & successCount & "; failed: " & failureCount & ". Log: " & logFilePath
+     If failureCount > 0 Then
+         MsgBox "Assembly PDF export had failures." & vbCrLf & _
+                "Created: " & successCount & "; failed: " & failureCount & vbCrLf & _
+                "Log file: " & logFilePath, vbExclamation, "PDF Export Failures"
      End If
 
 End Sub
@@ -399,19 +385,23 @@ Function ProcessAssemblyDrawing(drawingPath As String) As Boolean
      Dim swDrawModel As SldWorks.ModelDoc2
      Dim baseName As String
      Dim isMainAssembly As Boolean
+     Dim started As Double
+     Dim openErrors As Long, openWarnings As Long
 
      ProcessAssemblyDrawing = False
 
      On Error GoTo ErrorHandler
+     started = Timer
 
      ' Open the drawing (not read-only, so we can modify it)
      LogWrite "  Opening drawing..."
-     Set swDraw = swApp.OpenDoc6(drawingPath, swDocDRAWING, swOpenDocOptions_e.swOpenDocOptions_Silent, "", 0, 0)
+     Set swDraw = swApp.OpenDoc6(drawingPath, swDocDRAWING, swOpenDocOptions_e.swOpenDocOptions_Silent, "", openErrors, openWarnings)
 
-     If swDraw Is Nothing Then
-         LogWrite "  ERROR: Failed to open drawing"
+     If swDraw Is Nothing Or openErrors <> 0 Then
+         LogWrite "  ERROR: Failed to open drawing; errors=" & openErrors & ", warnings=" & openWarnings
          Exit Function
      End If
+     If openWarnings <> 0 Then LogWrite "  Drawing open warnings: " & openWarnings
 
      LogWrite "  Drawing opened successfully"
      Set swDrawModel = swDraw
@@ -428,6 +418,7 @@ Function ProcessAssemblyDrawing(drawingPath As String) As Boolean
          ProcessAssemblyDrawing = ProcessSubAssemblyDrawing(swDraw, swDrawModel, drawingPath)
      End If
       
+     LogWrite "  Drawing elapsed seconds: " & Format(PDFElapsedSeconds(started), "0.0")
      Exit Function
 
 ErrorHandler:
@@ -451,18 +442,14 @@ Function ProcessSubAssemblyDrawing(swDraw As SldWorks.DrawingDoc, swDrawModel As
      Dim swTopView As SldWorks.View
      Dim pdfPath As String
      Dim fileName As String
-     Dim saveError As Long
 
      ProcessSubAssemblyDrawing = False
 
      On Error GoTo ErrorHandler
       
-     On Error Resume Next
-       
      ' Process Sheet1 (Exploded View)
      LogWrite "  Activating Sheet1..."
-     If swDrawModel.ActivateSheet("Sheet1") Then
-         swDrawModel.ForceRebuild3 False
+     If swDraw.ActivateSheet("Sheet1") Then
          LogWrite "    Sheet1 activated"
             
          ' Get exploded view
@@ -470,19 +457,18 @@ Function ProcessSubAssemblyDrawing(swDraw As SldWorks.DrawingDoc, swDrawModel As
          Set swExplodedView = GetFirstModelView(swDraw)
          If Not swExplodedView Is Nothing Then
              LogWrite "    Found exploded view, positioning..."
-             ProcessSheet1Exploded swDraw, swDrawModel, swExplodedView
+             LogWrite "    " & PDFPrepareSheet(swDraw, swDrawModel, swExplodedView, Nothing, Nothing, "exploded")
              LogWrite "    Exploded view positioned"
          Else
-             LogWrite "    No exploded view found"
+             Err.Raise vbObjectError + 2600, "ProcessSubAssemblyDrawing", "No exploded view found on Sheet1."
          End If
      Else
-         LogWrite "    Sheet1 not found, skipping"
+         Err.Raise vbObjectError + 2600, "ProcessSubAssemblyDrawing", "Sheet1 was not found."
      End If
        
      ' Process Sheet2 (Isometric + Top View)
      LogWrite "  Activating Sheet2..."
-     If swDrawModel.ActivateSheet("Sheet2") Then
-         swDrawModel.ForceRebuild3 False
+     If swDraw.ActivateSheet("Sheet2") Then
          LogWrite "    Sheet2 activated"
            
          ' Get isometric and top views
@@ -492,21 +478,16 @@ Function ProcessSubAssemblyDrawing(swDraw As SldWorks.DrawingDoc, swDrawModel As
           
          If Not swIsometricView Is Nothing Or Not swTopView Is Nothing Then
              LogWrite "    Found assembly views, positioning..."
-             ProcessSheet2Assembly swDraw, swDrawModel, swIsometricView, swTopView
+             LogWrite "    " & PDFPrepareSheet(swDraw, swDrawModel, swIsometricView, swTopView, Nothing, "assembly")
              LogWrite "    Assembly views positioned"
          Else
-             LogWrite "    No assembly views found"
+             Err.Raise vbObjectError + 2600, "ProcessSubAssemblyDrawing", "No assembly views found on Sheet2."
          End If
      Else
-         LogWrite "    Sheet2 not found, skipping"
+         Err.Raise vbObjectError + 2600, "ProcessSubAssemblyDrawing", "Sheet2 was not found."
      End If
 
      On Error GoTo ErrorHandler
-
-     ' Save the drawing
-     LogWrite "  Saving drawing..."
-     swDrawModel.Save
-     LogWrite "  Drawing saved"
 
      ' Get PDF output path
      fileName = Left(drawingPath, InStrRev(drawingPath, ".") - 1)
@@ -524,12 +505,7 @@ Function ProcessSubAssemblyDrawing(swDraw As SldWorks.DrawingDoc, swDrawModel As
 
      ' Export to PDF
      LogWrite "  Exporting to PDF: " & pdfPath
-     On Error Resume Next
-       
-     ' SaveAs with .PDF extension works (returns -1 but creates file)
-     LogWrite "  Using SaveAs to create PDF..."
-     saveError = swDrawModel.SaveAs(pdfPath)
-     LogWrite "  SaveAs returned code: " & saveError
+     PDFExportDrawing swApp, swDrawModel, pdfPath
        
      On Error GoTo ErrorHandler
       
@@ -578,18 +554,14 @@ Function ProcessMainAssemblyDrawing(swDraw As SldWorks.DrawingDoc, swDrawModel A
      Dim swIsometricView As SldWorks.View
      Dim pdfPath As String
      Dim fileName As String
-     Dim saveError As Long
 
      ProcessMainAssemblyDrawing = False
 
      On Error GoTo ErrorHandler
       
-     On Error Resume Next
-       
      ' Process Sheet1 (Main Assembly Views - Top, Front, Isometric)
      LogWrite "  Activating Sheet1..."
-     If swDrawModel.ActivateSheet("Sheet1") Then
-         swDrawModel.ForceRebuild3 False
+     If swDraw.ActivateSheet("Sheet1") Then
          LogWrite "    Sheet1 activated"
             
          ' Get the three views (Top, Front, Isometric)
@@ -600,21 +572,16 @@ Function ProcessMainAssemblyDrawing(swDraw As SldWorks.DrawingDoc, swDrawModel A
           
          If Not swTopView Is Nothing Or Not swFrontView Is Nothing Or Not swIsometricView Is Nothing Then
              LogWrite "    Found main assembly views, positioning..."
-             ProcessMainAssemblyViews swDraw, swDrawModel, swTopView, swFrontView, swIsometricView
+             LogWrite "    " & PDFPrepareSheet(swDraw, swDrawModel, swTopView, swFrontView, swIsometricView, "main")
              LogWrite "    Assembly views positioned"
          Else
-             LogWrite "    No views found"
+             Err.Raise vbObjectError + 2600, "ProcessMainAssemblyDrawing", "No assembly views found on Sheet1."
          End If
      Else
-         LogWrite "    Sheet1 not found, skipping"
+         Err.Raise vbObjectError + 2600, "ProcessMainAssemblyDrawing", "Sheet1 was not found."
      End If
 
      On Error GoTo ErrorHandler
-
-     ' Save the drawing
-     LogWrite "  Saving drawing..."
-     swDrawModel.Save
-     LogWrite "  Drawing saved"
 
      ' Get PDF output path
      fileName = Left(drawingPath, InStrRev(drawingPath, ".") - 1)
@@ -632,12 +599,7 @@ Function ProcessMainAssemblyDrawing(swDraw As SldWorks.DrawingDoc, swDrawModel A
 
      ' Export to PDF
      LogWrite "  Exporting to PDF: " & pdfPath
-     On Error Resume Next
-       
-     ' SaveAs with .PDF extension works (returns -1 but creates file)
-     LogWrite "  Using SaveAs to create PDF..."
-     saveError = swDrawModel.SaveAs(pdfPath)
-     LogWrite "  SaveAs returned code: " & saveError
+     PDFExportDrawing swApp, swDrawModel, pdfPath
        
      On Error GoTo ErrorHandler
       
@@ -1430,7 +1392,7 @@ Sub PositionAndScaleAssemblyViews(swDraw As SldWorks.DrawingDoc, swDrawModel As 
      If Not swIsometricView Is Nothing Then
          verifyIsoPos = swIsometricView.Position
          LogWrite "        Isometric after rebuild: " & verifyIsoPos(0) & ", " & verifyIsoPos(1)
-         If Abs(verifyIsoPos(0) - targetIsoX) > 0.001 Or Abs(verifyIsoPos(1) - targetIsoY) > 0.001 Then
+         If Abs(verifyIsoPos(0) - posIso(0)) > 0.001 Or Abs(verifyIsoPos(1) - posIso(1)) > 0.001 Then
              LogWrite "        ✗ WARNING: Isometric position changed after rebuild!"
          Else
              LogWrite "        ✓ Isometric position maintained"
@@ -1439,7 +1401,7 @@ Sub PositionAndScaleAssemblyViews(swDraw As SldWorks.DrawingDoc, swDrawModel As 
      If Not swTopView Is Nothing Then
          verifyTopPos = swTopView.Position
          LogWrite "        Top view after rebuild: " & verifyTopPos(0) & ", " & verifyTopPos(1)
-         If Abs(verifyTopPos(0) - targetTopX) > 0.001 Or Abs(verifyTopPos(1) - targetTopY) > 0.001 Then
+         If Abs(verifyTopPos(0) - posTop(0)) > 0.001 Or Abs(verifyTopPos(1) - posTop(1)) > 0.001 Then
              LogWrite "        ✗ WARNING: Top view position changed after rebuild!"
          Else
              LogWrite "        ✓ Top view position maintained"
@@ -1504,7 +1466,7 @@ Sub AutoAdjustTopViewDimensions(swDrawModel As SldWorks.ModelDoc2, swTopView As 
                  ' Auto-jog ordinate dimension
                  If IsOrdinateDimension(swDispDim) Then
                      On Error Resume Next
-                     swDispDim.AutoJogOrdinate()
+                     Call swDispDim.AutoJogOrdinate()
                      On Error GoTo 0
                  End If
                  ' Select for auto arrange
@@ -1587,8 +1549,8 @@ Function IsMainAssemblyDrawing(baseName As String) As Boolean
      
      fileParts = Split(baseName, "-")
      
-     ' Count C and S prefixes
-     For i = 0 To UBound(fileParts)
+     ' The last token is a revision (for example C1), not a planter length.
+     For i = 0 To UBound(fileParts) - 1
           part = fileParts(i)
           partUpper = UCase(part)
           
@@ -2407,5 +2369,3 @@ Sub OpenLogFile()
      On Error GoTo 0
 
 End Sub
-
-

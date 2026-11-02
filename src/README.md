@@ -42,6 +42,8 @@ button/shortcut pointing at that procedure.
    Import [UIQuoteComponent.cls](UIQuoteComponent.cls) as a class for the
    component area breakdown. For an existing quote installation, replace
    `UIQuoteResult` and `ui_quote_calculator` and add `UIQuoteComponent`.
+   Import [ui_rerun.bas](ui_rerun.bas) as a standard module for rerunning
+   from an output assembly and Exports only.
 6. Ensure references to **SOLIDWORKS type library**, **SOLIDWORKS Constant
    type library**, and **Microsoft Forms 2.0 Object Library** are enabled.
    Inserting a UserForm normally adds the Forms reference automatically.
@@ -90,6 +92,26 @@ The window closes on completion or failure; failures release temporary
 settings and show the existing error dialogs. Timing-storage errors are
 reported separately without claiming the model workflow failed.
 
+### Nonblocking status messages
+
+The UI workflow, rerun/export-only paths and four standalone exporters use the
+SolidWorks status bar for routine start, completion and cancellation summaries.
+PDF summaries and workflow results also remain in their existing logs. Preview
+status and its log retain the instruction to close the template without saving.
+Closing the progress window while a run is active displays guidance inside the
+window instead of an OK-only popup.
+
+Overwrite, save and cancel decisions are unchanged. Invalid inputs, export
+failures, cleanup/reopen warnings and other actionable errors still display
+warnings/errors, including partial export failures; they are not reported as
+successful completion. The original manual `packngo()` entry point/module is
+unchanged.
+
+To install this change, replace `userform_automation`, `ui_rerun`,
+`UIProgressSession` and the code behind `UserForm_AutomationProgress` in the
+Pack-and-Go project, plus the main module in each standalone exporter project.
+Keep existing module/form names, compile and save each project.
+
 **Wait for the current run to finish before updating/recompiling the macro.**
 These additions cannot attach a progress window to an already-running macro.
 While a modeless progress window is displayed, do not change the active
@@ -118,6 +140,101 @@ The preview still writes a local timing log (`RUN_PREVIEW` on completion).
 To install this UI change, replace `userform_automation` and the entire code
 behind the existing `UserForm_AutomationUI`, compile and save. No new class
 or form is required.
+
+### Rerun from an output assembly
+
+Open a packed output assembly (any main assembly other than
+`planter_assembly.SLDASM` that has the embedded design table) and run
+`RunWithUI`. The form opens in rerun mode, prefilled from that assembly's
+globals (walls, side, return, dimensions, material, thickness, mounting and
+baseplate override). Preview is locked. The output parent folder defaults to
+the original output's parent; type or browse to another existing folder to
+create the new part-number folder there. Reruns use that parent directly,
+without adding a `PACK_TEST` subfolder. Exports only locks the folder controls
+and continues exporting from the open assembly. The rerun copies
+this output, not the template, so custom cuts in its parts and drawings are kept.
+The original is not renamed or deleted.
+
+Clicking Run:
+
+1. Checks the selected export macros. If any planter file in the output folder
+   has unsaved changes, asks to save them first (No stops without changes).
+2. Closes the saved original documents, then copies model/drawing files to a
+   unique `PlanterRerun-*` folder under
+   `%LOCALAPPDATA%` on a local fixed drive (outside Windows Temp) and redirects
+   references between copied files. Missing or invalid staging roots stop the
+   run with an error; no network or Temp fallback is used. File
+   names stay unchanged. Redirects only closed staged documents and verifies
+   each replacement by reading its dependencies back. Opens and checks the
+   local working copy. New inputs are never applied to the original.
+   Native API Boolean results are compared explicitly with `False` (zero),
+   not negated with VBA's bitwise `Not`. A raw COM probe returned `1` for
+   success rather than VBA's canonical `-1`; negating `1` incorrectly entered
+   the failure branch in earlier versions. Two retained failed runs had in
+   fact saved the correct replacement. A genuinely `False`
+   result is logged as a warning only when read-back confirms the local target
+   exists in the dependencies and the original reference is absent; otherwise
+   staging stops. A `True` result must pass the same checks.
+3. Applies the inputs to the local design table, rebuilds and verifies the
+   calculated dimensions needed for naming.
+4. Builds the new part numbers with the first free `-C<n>` folder in the
+   selected parent. Even unchanged dimensions create a new folder; the source is
+   never reused as the destination.
+5. Uses native Pack and Go **from the local working copy**, including suppressed components and associated
+   drawings. Checks that every existing model/drawing in the source folder
+   appears in the native document list; missing documents stop the run rather
+   than being silently omitted. Recognized planter
+   files get the new part numbers; other files in the document list retain
+   their names. Duplicate destination names stop the run before copying.
+   Every save status and expected destination file is checked.
+6. Closes the local working copy and removes the exact temporary files created
+   by this run. Cleanup warnings are reported, not silently ignored. Existing
+   custom edits saved with approval in step 1 stay saved in the original.
+7. Opens the new assembly and checks that its component paths are inside the
+   new folder. Applies the requested inputs there, verifies the dimensions
+   and saves the assembly and references.
+8. Closes and reopens the saved new assembly, rebuilds and verifies it again,
+   then runs only the selected exports.
+
+Equations in parts and subassemblies link to their parents by file or
+component name (for example `"OVERALL_LENGTH@1-C4200-1400-22-C1-1.Assembly"`,
+where `-1` is the component instance, which is kept).
+Pack and Go, rather than manual equation-text rewriting, updates those links.
+Live testing found that simple filesystem renames can leave equations
+displaying the current names but failing evaluation.
+Controlled tests on a healthy output copy isolated the failure to renaming
+the master assembly: a folder-path change rebuilt successfully, but renaming
+only the master through the filesystem and replacing references produced 39
+equation failures. Reversing that rename restored a clean rebuild. Native
+Save As passed initially but failed after saving and reopening; it is not a
+verified alternative. A local Pack and Go master rename passed both the
+initial rebuild and a save/close/reopen/rebuild cycle with zero equation
+failures. A subsequent 200-inch dimension-change test copied all 34
+model/drawing files, passed the save/reopen/rebuild cycle, and verified that
+all 17 drawings referenced models in the new folder. These were direct API
+tests on diagnostic copies; the updated VBA entry point and export generation
+still need validation in the imported macro project.
+On rebuild failure, diagnostics also check equation-manager status in loaded
+documents, even when the What's Wrong API returns no items. A previously
+broken output is not automatically repaired: start from an output that rebuilds
+correctly, or restore a known-good backup.
+
+The run log lists the local working folder, individual native collection
+timings and the source-to-destination copy plan. Local staging avoids obtaining
+the native Pack and Go graph directly from the network output, which stalled
+and failed during testing. The final destination uses the selected parent,
+including on a network share. On failure, a partial or unverified destination
+and the local working copy may remain for inspection and must not be used.
+The original folder is not deleted automatically. Existing PDF/DXF/STEP exports
+are not copied; select the export types needed for the new output. Files under
+PDM must be writable for any approved saves. Leave the VBA editor closed while running.
+
+### Exports only
+
+In rerun mode, check **Exports only (no model changes)** to run just the
+checked PDF/DXF/STEP exporters on the open output assembly. Model inputs and
+Quote only are locked, nothing is saved or renamed, and at least one export
+must be selected.
 
 ### Standalone quote-only quantities
 
@@ -629,7 +746,7 @@ Logs include:
   Each record is written and closed immediately, so an interrupted run
   retains the events already written even without a final summary.
 
-The final completion/error dialog gives the log path. After a run, leave
+The final status-bar message or error dialog gives the log path. After a run, leave
 the file in `run-logs` and point the assistant at its filename for analysis.
 Logs remain **local and Git-ignored**, since they contain engineering inputs
 and local/network paths. No log is uploaded or committed automatically.
@@ -786,10 +903,14 @@ quote-only, all exports can be off for model-only output.
   naming/export helpers, with instrumented UI collection instead of Step 4,
   but does not call `RunPackAndGo`, the interactive destination/save Steps
   5/8, or `PromptAndRunExports`. All option selections happen in the form.
-- The selected parent must already exist. Output goes to
-  `<parent>\PACK_TEST\<part-number>\`, unless the parent already contains a
-  complete `PACK_TEST` path segment. The unchanged exporters require that
-  marker. Existing part-number folders are rejected, never cleared or
+- The selected parent must already exist. UI output goes directly to
+  `<parent>\<main-assembly-name>\`; no `PACK_TEST` folder is added.
+  New template runs require choosing a parent; reruns default to the original
+  output's parent. The four exporters use the active saved assembly's folder
+  without requiring a path marker and reject the original template by name.
+  Update each export macro's own `.swp` project with its corresponding `.bas`
+  module to enable this behavior. The manual `packngo()` destination is unchanged.
+  Existing part-number folders are rejected, never cleared or
   overwritten; select another parent for another run of the same part.
 - The adapter opens the embedded design table using `EditTable2(True)`,
   validates the headers, input labels, formula cells and configuration, and
@@ -850,11 +971,11 @@ quote-only, all exports can be off for model-only output.
   in the same configuration, rebuilt, checked against the calculated
   table outputs, and saved before the selected export macros are invoked.
 - Selected macro files are checked before execution, and the packed assembly
-  is reactivated before each export. The unchanged exporters still display
-  status, cancellation, completion, and error dialogs. Their entry points
+  is reactivated before each export. Exporters use nonblocking status messages
+  for routine progress/results and retain decision and error dialogs. Their entry points
   return no export-result status, so a successful invocation is **not**
-  presented as proof that every export succeeded; review their dialogs/logs.
-  A completely unattended export run is not possible without changing them.
+  presented as proof that every export succeeded; review their status/logs.
+  Overwrite/cancel decisions and actionable failures can still interrupt a run.
 - Errors stop the workflow visibly. Partial output is kept for inspection;
   nothing is automatically deleted.
 
@@ -938,20 +1059,112 @@ for you to paste into the VBA editor (Tools > Macro > Edit / New).
   and `MACRO_FOLDER` constant near the top (shared state section).
 
 ## 2. pdfassemblies.bas -> pdfassemblies.swp (module: pdfassemblies1)
-**CHANGED - IMPORTANT.** The live version currently uses old fixed
-`SetPosition` coordinates for the Top/Front/Isometric views in
-`ProcessMainAssemblyViews`, which is exactly the bug that caused views to
-visually shift at different scales. This version replaces that with:
-- Outline-based centering (measures the view's actual visual bounding box).
-- An anchor-to-outline offset correction (the root cause fix - `View.Position`
-  is an internal anchor point, not the bounding box corner, and the gap
-  between them scales with view scale).
-- New measured center coordinates: Top (5.31, 6.27), Front (5.31, 2.78),
-  Isometric (11.29, 8.51) in inches - captured via GET_VIEW_POSITIONS.bas.
+Replace the code in `pdfassemblies1` and **import
+[PDFDrawingTools.bas](PDFDrawingTools.bas) as a standard module in this
+exporter's project**. Compile and save that `.swp`.
+
+The active export path uses the shared measured-layout helpers instead of the
+legacy fixed-position and filename-scale routines retained in the module.
+It preserves the main assembly's top/front/isometric layout and the two
+subassembly sheets (exploded, then isometric/top).
 
 ## 3. pdfcomponents.bas -> pdfcomponents.swp (module: pdfcomponents1)
-**UNCHANGED** from the live version (already had the correct offset-based
-positioning). Included here only for completeness/reference.
+Replace the code in `pdfcomponents1` and **import
+[PDFDrawingTools.bas](PDFDrawingTools.bas) into this exporter's project too**.
+Compile and save. This shared module belongs in both PDF projects, not just
+the main `packngo` project.
+
+### PDF layout and export behavior
+
+- Turns off sketch display in the drawing (not the application's global
+  preferences) before fitting views and keeps that setting in the saved drawing.
+  Hides dangling display dimensions and center marks on each processed sheet without deleting
+  them. Valid dimensions, notes, balloons, BOMs, and sheet borders are preserved.
+  Uses SolidWorks' dangling-reference status, not annotation color alone.
+  Hole center marks with valid references (including their existing extensions) and dotted
+  exploded-view guide lines are deliberately retained.
+- Measures the current sheet, view outlines, visible attached annotation anchors and
+  dimension/note display-line endpoints (including extension lines);
+  no longer guesses scale from part-number tokens (the old assembly parser
+  read `1-C6975-2000-22-C1` as length 0.01 and height 69.75).
+- Fits a standard scale to the measured layout, retaining one common scale
+  per sheet and updating the title-block sheet scale to match. View positions
+  compensate for the anchor-to-outline offset.
+- Reserves a right-hand title-block/note column (2.5 inches), outer margins,
+  and top BOM space on main/exploded sheets. These clearances target the
+  supplied 17-by-11-inch drawing templates; custom sheet formats need review.
+- Keeps the component front/edge pair on the same row, with the bend view
+  below. Accounts for a third view wider than the first row; removes the
+  previous extra one-inch left shift and incorrect three-view vertical offset.
+- Arranges dimensions once, then refits their positions. Checks view and
+  annotation bounds for page/title-block clearance and mutual overlap
+  before exporting. This is not a full text/leader collision detector.
+  Center-mark extension geometry is not included in this bounds check.
+  Hidden annotations are excluded from fitting and dimension arrangement, so
+  their extension lines cannot unnecessarily shrink the printed views.
+  Logs the combined number of newly hidden dangling dimensions/center marks per sheet. Hiding does
+  not repair their references.
+- On the side assembly's exploded sheet, regenerates BOM-linked balloons using
+  the current component rows without renumbering the BOM. Shows valid balloons
+  that inherited a hidden state while their component was suppressed, and hides
+  stale dangling BOM balloons. Checks both the item number and actual attached
+  component against the BOM and rejects missing/mismatched balloons.
+  Thus an added center gusset receives its own visible balloon (item 6 in the
+  supplied BOM); it is not relabeled as the baseplate.
+  Repositions the baseplate balloon's arrow to its leftmost visible straight
+  edge after each scale/placement pass, retaining the actual baseplate attachment
+  and moving the label down/left to separate it from nearby gussets. Uses the
+  existing `1-S...` side-assembly and `...-BP-...` baseplate naming conventions.
+  The baseplate attachment remains specific to side assemblies.
+- For every assembly view, places circular BOM balloon bodies outside the
+  entire geometry outline, including other views on the same sheet. Targets a
+  0.20-inch gap and verifies at least 0.15 inch to model outlines and other
+  balloon bodies. Uses the printed circle arcs, not the legacy balloon-info
+  coordinates, which can remain stale after moving a note.
+  Keeps existing BOM numbers and component/leader attachments; chooses nearby
+  exterior positions using the leader attachment point. Leaders still have to
+  reach their components; this is not a guarantee of zero leader crossings.
+  Refits assembly views up to four times if needed, reactivates every sheet for
+  final balloon placement inside the reserved drawing area, and verifies again
+  after the drawing save before exporting. A collision, unmeasurable/noncircular
+  balloon, or lack of a clear position stops that drawing with a logged error,
+  rather than exporting an unchecked result.
+  Actual VBA export checks cover all three supplied assembly drawings (five
+  sheets), including repeat exports of saved drawings. Reopened drawing geometry
+  confirms the 0.15-inch circle clearances and reserved footer/border clearance.
+- Performs one full rebuild per sheet, smart rebuilds only as needed for
+  scaling and final placement, one drawing-only save, and one checked native
+  PDF export with all sheet names explicitly selected. Does not save referenced
+  models during PDF export. Removes the component export's duplicate fallback
+  save caused by interpreting a successful Boolean as a nonzero error code.
+- Logs actual component successes/failures rather than claiming that every
+  drawing in the folder exported. Component logs include open, layout and
+  save/export timings; assembly logs include per-drawing elapsed time, under
+  the output's `LOGS` folder.
+
+Validation uses layout-math tests plus native SolidWorks API tests on disposable
+drawing copies. The native harness executes the actual shared layout planner
+through Windows Script Host and uses typed interop for drawing operations.
+It is not a compilation or end-to-end execution of the imported VBA projects.
+Balloon helper bodies also run against mock API objects to test hidden-gusset
+visibility and missing/mismatched balloon rejection. Native attachment and
+printed-label checks cover the side assembly with five BOM items (no center
+gusset) and six items (center gusset present) on rebuilt disposable model copies.
+Multi-size native checks rebuilt local model copies at 96 x 24 x 12,
+156 x 24 x 20, and 240 x 36 x 36 inches: 33 PDFs / 39 sheets total. Main
+assembly scales were 1:20, 1:30, and 1:50 respectively. These diagnostic
+copies retained the source part numbers; they were not production naming tests.
+Review the regenerated preview PDFs before deploying to production.
+
+The standalone assembly and component PDF projects were also compiled and saved
+in SolidWorks 2022 SP5.0 during deployment verification on 2026-10-30. Exported
+module code was compared with the repository source, allowing only VBA's
+automatic formatting. This compile check does not replace an end-to-end export
+run on a disposable assembly.
+
+Assembly drawing classification excludes the final revision token when checking
+for center/side length prefixes. A side drawing ending in `C1` is a subassembly,
+not a main assembly: both sheets are laid out and its BOM balloons are repaired.
 
 ## 4. dxfcomponents.bas -> NEW FILE
 Does not exist live yet. In SolidWorks: Tools > Macro > New, save as

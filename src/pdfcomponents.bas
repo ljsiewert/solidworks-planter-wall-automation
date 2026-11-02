@@ -7,6 +7,8 @@ Option Explicit
 ' Action: UPDATE NEEDED. Tools > Macro > Edit on pdfcomponents.swp,
 '         select all code in module pdfcomponents1, delete, paste this
 '         file's content in, save.
+'         Also import PDFDrawingTools.bas into this project.
+' Active export uses measured layout, one drawing-only save and one PDF export.
 ' Changed: Added swApp.UserControlBackground = True/False around the
 '         drawing processing loop so drawings open/close silently in the
 '         background (no window flashing/stealing focus) - faster and
@@ -29,7 +31,7 @@ Option Explicit
 ' - Dimension auto-arrangement
 '
 ' Run from the main assembly after Pack and Go completes.
-' Reads component drawings from the PACK_TEST output folder.
+' Reads component drawings from the packed output folder.
 '============================================================
 
 Public swApp As SldWorks.SldWorks
@@ -38,6 +40,7 @@ Public swModel As SldWorks.ModelDoc2
 Public packTestFolder As String
 Public destFolder As String
 Public pdfFolder As String
+Private componentLogPath As String
 
 ' Windows API for ESC-key cancel polling (see CancelRequested below)
 #If VBA7 Then
@@ -86,6 +89,7 @@ Sub RunPDFComponentDrawings()
     Dim drawingPath As String
     Dim success As Boolean
 
+    On Error GoTo Failed
     Set swApp = Application.SldWorks
     Set swModel = swApp.ActiveDoc
 
@@ -95,7 +99,7 @@ Sub RunPDFComponentDrawings()
     End If
 
     If swModel.GetType <> swDocASSEMBLY Then
-        MsgBox "Please run this from the packed assembly (from PACK_TEST folder).", vbExclamation
+        MsgBox "Please run this from the packed output assembly.", vbExclamation
         Exit Sub
     End If
 
@@ -110,11 +114,8 @@ Sub RunPDFComponentDrawings()
     destFolder = Left(assemblyPath, InStrRev(assemblyPath, "\") - 1) & "\"
     pdfFolder = destFolder & "PDF_Components\"
 
-    ' Verify this is a Pack and Go folder
-    If InStr(1, destFolder, "PACK_TEST", vbTextCompare) = 0 Then
-        MsgBox "This assembly does not appear to be from a Pack and Go output folder." & vbCrLf & vbCrLf & _
-               "Please open the assembly from:" & vbCrLf & _
-               "Z:\...\PACK_TEST\<part_number>\", vbExclamation
+    If StrComp(Mid$(assemblyPath, InStrRev(assemblyPath, "\") + 1), "planter_assembly.SLDASM", vbTextCompare) = 0 Then
+        MsgBox "Open the packed output assembly, not the original planter_assembly.SLDASM template.", vbExclamation
         Exit Sub
     End If
 
@@ -150,12 +151,12 @@ Sub RunPDFComponentDrawings()
         MsgBox "No active components found in the assembly.", vbExclamation
         Exit Sub
     End If
+    If Dir$(destFolder & "LOGS", vbDirectory) = "" Then MkDir destFolder & "LOGS"
+    componentLogPath = destFolder & "LOGS\Component_PDF_" & Format(Now, "yyyy-mm-dd_HH-mm-ss") & ".txt"
+    ComponentLog "Starting component PDFs: " & swModel.GetPathName
 
-    MsgBox "Found " & activeCount & " active components." & vbCrLf & _
-           "Processing component drawings..." & vbCrLf & vbCrLf & _
-           "Folder: " & destFolder & vbCrLf & vbCrLf & _
-           "Press ESC at any time to cancel after the current drawing finishes." & vbCrLf & vbCrLf & _
-           "This may take a few minutes.", vbInformation, "Starting PDF Export"
+    swApp.Frame.SetStatusBarText "Exporting drawings for " & activeCount & _
+        " active components to PDF. Press ESC to cancel after the current drawing."
 
     ' Open/close drawings silently in the background - no window
     ' flashing or stealing focus while processing, which is both
@@ -165,6 +166,7 @@ Sub RunPDFComponentDrawings()
     ' Process each drawing (only open if it's for an active component)
     Dim wasCancelled As Boolean
     Dim processedCount As Long
+    Dim successCount As Long, failureCount As Long
     wasCancelled = False
     processedCount = 0
 
@@ -181,23 +183,38 @@ Sub RunPDFComponentDrawings()
             success = ProcessComponentDrawing(drawingPath)
             processedCount = processedCount + 1
             
-            If Not success Then
-                MsgBox "Failed to process: " & fileList(i), vbExclamation
+            If success Then
+                successCount = successCount + 1
+            Else
+                failureCount = failureCount + 1
             End If
         End If
     Next i
 
     swApp.UserControlBackground = False
+    ComponentLog "Processed=" & processedCount & "; succeeded=" & successCount & "; failed=" & failureCount
 
-    If wasCancelled Then
-        MsgBox "PDF export cancelled by user." & vbCrLf & vbCrLf & _
-               "Drawings processed before cancelling: " & processedCount & " of " & fileCount & vbCrLf & vbCrLf & _
-               "Files saved so far:" & vbCrLf & pdfFolder, vbExclamation, "Cancelled"
-    Else
-        MsgBox fileCount & " component PDFs created successfully!" & vbCrLf & vbCrLf & _
-               "Files saved to:" & vbCrLf & pdfFolder, vbInformation, "Complete"
+    ComponentLog IIf(wasCancelled, "Cancelled by user.", "Export finished.")
+    swApp.Frame.SetStatusBarText IIf(wasCancelled, "Component PDF export cancelled.", "Component PDF export finished.") & _
+        " Created: " & successCount & "; failed: " & failureCount & ". Log: " & componentLogPath
+    If failureCount > 0 Then
+        MsgBox "Component PDF export had failures." & vbCrLf & _
+               "Created: " & successCount & "; failed: " & failureCount & vbCrLf & _
+               "Log: " & componentLogPath, vbExclamation, "PDF Export Failures"
     End If
+    Exit Sub
+Failed:
+    If Not swApp Is Nothing Then swApp.UserControlBackground = False
+    MsgBox "Component PDF export stopped: " & Err.Description, vbCritical, "PDF Export"
 
+End Sub
+
+Private Sub ComponentLog(ByVal message As String)
+    Dim handle As Integer
+    handle = FreeFile
+    Open componentLogPath For Append As #handle
+    Print #handle, Format(Now, "yyyy-mm-dd HH:mm:ss") & " " & message
+    Close #handle
 End Sub
 
 
@@ -416,18 +433,26 @@ Function ProcessComponentDrawing(drawingPath As String) As Boolean
     Dim swView3 As SldWorks.View
     Dim pdfPath As String
     Dim fileName As String
-    Dim saveError As Long
+    Dim openErrors As Long, openWarnings As Long
+    Dim layoutResult As String
+    Dim started As Double, phaseStarted As Double
+    Dim failureMessage As String
 
     ProcessComponentDrawing = False
 
     On Error GoTo ErrorHandler
+    started = Timer
+    phaseStarted = started
+    ComponentLog "Opening " & drawingPath
 
     ' Open the drawing (not read-only, so we can modify it)
-    Set swDraw = swApp.OpenDoc6(drawingPath, swDocDRAWING, swOpenDocOptions_e.swOpenDocOptions_Silent, "", 0, 0)
+    Set swDraw = swApp.OpenDoc6(drawingPath, swDocDRAWING, swOpenDocOptions_e.swOpenDocOptions_Silent, "", openErrors, openWarnings)
 
-    If swDraw Is Nothing Then
-        Exit Function
+    If swDraw Is Nothing Or openErrors <> 0 Then
+        Err.Raise vbObjectError + 2600, "ProcessComponentDrawing", "Cannot open drawing; errors=" & openErrors & ", warnings=" & openWarnings
     End If
+    If openWarnings <> 0 Then ComponentLog "Drawing open warnings: " & openWarnings
+    ComponentLog "Open seconds: " & Format(PDFElapsedSeconds(phaseStarted), "0.0")
 
     Set swDrawModel = swDraw
 
@@ -435,8 +460,7 @@ Function ProcessComponentDrawing(drawingPath As String) As Boolean
     Set swView1 = GetDrawingView(swDraw, 1)
 
     If swView1 Is Nothing Then
-        swApp.CloseDoc drawingPath
-        Exit Function
+        Err.Raise vbObjectError + 2600, "ProcessComponentDrawing", "No model view found in the drawing."
     End If
 
     ' Get the second view if it exists
@@ -446,35 +470,33 @@ Function ProcessComponentDrawing(drawingPath As String) As Boolean
     Set swView3 = GetDrawingView(swDraw, 3)
 
     ' Apply positioning and scaling
-    PositionAndScaleViews swDraw, swDrawModel, swView1, swView2, swView3
-
-    ' Save the drawing (to suppress "save modified" dialog)
-    swDrawModel.Save
+    phaseStarted = Timer
+    layoutResult = PDFPrepareSheet(swDraw, swDrawModel, swView1, swView2, swView3, "component")
+    ComponentLog layoutResult & "; layout seconds: " & Format(PDFElapsedSeconds(phaseStarted), "0.0")
 
     ' Get PDF output path
     fileName = Left(drawingPath, InStrRev(drawingPath, ".") - 1)
     fileName = Right(fileName, Len(fileName) - InStrRev(fileName, "\"))
     pdfPath = pdfFolder & fileName & ".PDF"
 
-    ' Export to PDF with all sheets selected
-    saveError = swDrawModel.SaveAs3(pdfPath, 0, swSaveAsOptions_e.swSaveAsOptions_SaveReferenced)
-
-    ' If SaveAs3 fails, try SaveAs2
-    If saveError <> 0 Then
-        swDrawModel.SaveAs2 pdfPath, swSaveAsCurrentVersion, False, True
-    End If
+    phaseStarted = Timer
+    PDFExportDrawing swApp, swDrawModel, pdfPath
+    ComponentLog "Save/export seconds: " & Format(PDFElapsedSeconds(phaseStarted), "0.0")
 
     ' Close the drawing without saving again
     swApp.CloseDoc drawingPath
 
     ProcessComponentDrawing = True
+    ComponentLog "SUCCESS; total seconds: " & Format(PDFElapsedSeconds(started), "0.0")
     Exit Function
 
 ErrorHandler:
+    failureMessage = Err.Description
     If Not swDraw Is Nothing Then
         swApp.CloseDoc drawingPath
     End If
     ProcessComponentDrawing = False
+    ComponentLog "FAILED: " & drawingPath & " | " & failureMessage
 
 End Function
 
